@@ -107,7 +107,7 @@ func (m Model) loadCmd() tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		rows, err := k8sres.List(session.Clientset, kind, ns)
+		rows, err := k8sres.List(session.Clientset, session.Metrics, kind, ns)
 		return rowsLoadedMsg{kind: kind, ns: ns, rows: rows, err: err}
 	}
 }

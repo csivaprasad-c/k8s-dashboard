@@ -17,14 +17,16 @@ const listTimeout = 10 * time.Second
 
 // List fetches rows for a kind in the given namespace (ignored for
 // cluster-scoped kinds). It is a synchronous, single-shot call intended to
-// be run from a tea.Cmd goroutine, not the UI loop.
-func List(clientset *kubernetes.Clientset, kind Kind, namespace string) ([]Row, error) {
+// be run from a tea.Cmd goroutine, not the UI loop. metricsClient may be
+// nil; it's only consulted for KindNodes, and only to add usage columns —
+// its absence or failure never fails the list itself.
+func List(clientset *kubernetes.Clientset, metricsClient *metricsclientset.Clientset, kind Kind, namespace string) ([]Row, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 	defer cancel()
 
 	switch kind {
 	case KindNodes:
-		return listNodes(ctx, clientset)
+		return listNodes(ctx, clientset, metricsClient)
 	case KindPods:
 		return listPods(ctx, clientset, namespace)
 	case KindDeployments:
@@ -57,11 +59,31 @@ func age(t time.Time) string {
 	}
 }
 
-func listNodes(ctx context.Context, cs *kubernetes.Clientset) ([]Row, error) {
+// nodeUsage is one node's usage against its own allocatable capacity, used
+// to render the Nodes tab's CPU/MEMORY columns.
+type nodeUsage struct {
+	cpuMilli, cpuCapMilli int64
+	memBytes, memCapBytes int64
+}
+
+func listNodes(ctx context.Context, cs *kubernetes.Clientset, metricsClient *metricsclientset.Clientset) ([]Row, error) {
 	list, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
+
+	usage := map[string]nodeUsage{}
+	if metricsClient != nil {
+		if metricsList, mErr := metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{}); mErr == nil {
+			for _, nm := range metricsList.Items {
+				usage[nm.Name] = nodeUsage{
+					cpuMilli: nm.Usage.Cpu().MilliValue(),
+					memBytes: nm.Usage.Memory().Value(),
+				}
+			}
+		}
+	}
+
 	rows := make([]Row, 0, len(list.Items))
 	for _, n := range list.Items {
 		status := "NotReady"
@@ -76,16 +98,56 @@ func listNodes(ctx context.Context, cs *kubernetes.Clientset) ([]Row, error) {
 			}
 		}
 		roles := nodeRoles(n.Labels)
+
+		u, hasUsage := usage[n.Name]
+		u.cpuCapMilli = n.Status.Allocatable.Cpu().MilliValue()
+		u.memCapBytes = n.Status.Allocatable.Memory().Value()
+		cpuCell := "-"
+		memCell := "-"
+		if hasUsage {
+			cpuCell = usageCell(u.cpuMilli, u.cpuCapMilli, formatMilliCores)
+			memCell = usageCell(u.memBytes, u.memCapBytes, formatBytesCompact)
+		}
+
 		rows = append(rows, Row{
 			Name: n.Name,
 			Cells: []string{
-				n.Name, status, roles, n.Status.NodeInfo.KubeletVersion, age(n.CreationTimestamp.Time),
+				n.Name, status, roles, cpuCell, memCell, n.Status.NodeInfo.KubeletVersion, age(n.CreationTimestamp.Time),
 			},
 			StatusClass: class,
 		})
 	}
 	sortRows(rows)
 	return rows, nil
+}
+
+// usageCell renders "<used> (<pct>%)", e.g. "210m (1%)" or "1.3Gi (8%)".
+func usageCell(used, capacity int64, format func(int64) string) string {
+	if capacity <= 0 {
+		return format(used)
+	}
+	pct := float64(used) / float64(capacity) * 100
+	return fmt.Sprintf("%s (%.0f%%)", format(used), pct)
+}
+
+func formatMilliCores(m int64) string {
+	return fmt.Sprintf("%dm", m)
+}
+
+// formatBytesCompact renders a byte count in compact binary units (e.g.
+// "1.3Gi"), for narrow table cells; see also formatBytes in the dashboard
+// package, which spells the unit out for the roomier Overview panel.
+func formatBytesCompact(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%dB", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%ci", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 func nodeRoles(labels map[string]string) string {

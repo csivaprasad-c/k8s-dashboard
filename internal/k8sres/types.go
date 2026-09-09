@@ -51,7 +51,7 @@ func (k Kind) Namespaced() bool {
 func (k Kind) Columns() []string {
 	switch k {
 	case KindNodes:
-		return []string{"NAME", "STATUS", "ROLES", "VERSION", "AGE"}
+		return []string{"NAME", "STATUS", "ROLES", "CPU", "MEMORY", "VERSION", "AGE"}
 	case KindPods:
 		return []string{"NAME", "READY", "STATUS", "RESTARTS", "AGE"}
 	case KindDeployments:
