@@ -5,9 +5,9 @@ package ui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/csivaprasad/k8s-dashboard/internal/ui/screens/clusterselect"
-	"github.com/csivaprasad/k8s-dashboard/internal/ui/screens/connecting"
-	"github.com/csivaprasad/k8s-dashboard/internal/ui/screens/dashboard"
+	"github.com/csivaprasad-c/k8s-dashboard/internal/ui/screens/clusterselect"
+	"github.com/csivaprasad-c/k8s-dashboard/internal/ui/screens/connecting"
+	"github.com/csivaprasad-c/k8s-dashboard/internal/ui/screens/dashboard"
 )
 
 type state int

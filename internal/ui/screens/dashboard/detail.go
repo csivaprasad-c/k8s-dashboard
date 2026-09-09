@@ -6,8 +6,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/csivaprasad/k8s-dashboard/internal/k8sres"
-	"github.com/csivaprasad/k8s-dashboard/internal/ui/styles"
+	"github.com/csivaprasad-c/k8s-dashboard/internal/k8sres"
+	"github.com/csivaprasad-c/k8s-dashboard/internal/ui/styles"
 )
 
 type detailState struct {

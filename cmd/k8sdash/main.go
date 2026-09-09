@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/csivaprasad/k8s-dashboard/internal/ui"
+	"github.com/csivaprasad-c/k8s-dashboard/internal/ui"
 )
 
 // version is set at build time via -ldflags "-X main.version=...";

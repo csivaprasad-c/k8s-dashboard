@@ -1,6 +1,6 @@
 package dashboard
 
-import "github.com/csivaprasad/k8s-dashboard/internal/ui/styles"
+import "github.com/csivaprasad-c/k8s-dashboard/internal/ui/styles"
 
 func renderHelp() string {
 	text := `:                jump to a resource tab (type to search)

@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/csivaprasad/k8s-dashboard/internal/k8sres"
-	"github.com/csivaprasad/k8s-dashboard/internal/ui/styles"
+	"github.com/csivaprasad-c/k8s-dashboard/internal/k8sres"
+	"github.com/csivaprasad-c/k8s-dashboard/internal/ui/styles"
 )
 
 // visibleRows applies the active filter (substring match on the row name)

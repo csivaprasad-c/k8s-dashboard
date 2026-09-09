@@ -1,4 +1,4 @@
-module github.com/csivaprasad/k8s-dashboard
+module github.com/csivaprasad-c/k8s-dashboard
 
 go 1.27.1
 

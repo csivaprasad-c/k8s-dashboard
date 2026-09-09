@@ -3,7 +3,7 @@ package dashboard
 import (
 	"context"
 
-	"github.com/csivaprasad/k8s-dashboard/internal/k8sres"
+	"github.com/csivaprasad-c/k8s-dashboard/internal/k8sres"
 )
 
 // BackToClusterSelectMsg is emitted on Ctrl+K to hop back to the cluster
