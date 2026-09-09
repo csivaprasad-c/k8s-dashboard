@@ -20,6 +20,22 @@ go build -o bin/k8sdash ./cmd/k8sdash
 
 It reads `$KUBECONFIG` (or `~/.kube/config` if unset), exactly like `kubectl`.
 
+### Releasing
+
+Push a tag matching `v*.*.*` and [.github/workflows/release.yml](.github/workflows/release.yml)
+cross-compiles windows/amd64, darwin/arm64, and linux/arm64 (`make dist`),
+then publishes them as a GitHub Release with a `checksums.txt`:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+To re-run a release for a tag that's already been pushed (e.g. after a
+failed run), use the "Run workflow" button on the Release workflow in the
+Actions tab, or `gh workflow run release.yml -f tag=v0.1.0` — it replaces
+that release's assets instead of failing on "already exists".
+
 ## Screens
 
 1. **Cluster select** — every context in your merged kubeconfig, with
