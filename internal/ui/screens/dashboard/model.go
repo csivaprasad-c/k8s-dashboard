@@ -168,6 +168,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case overviewLoadedMsg:
+		if m.currentKind() != k8sres.KindOverview {
+			return m, nil // stale response from a since-changed tab
+		}
+		m.loading = false
 		if msg.err != nil {
 			m.overviewErr = msg.err.Error()
 			return m, nil
