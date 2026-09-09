@@ -67,6 +67,13 @@ func (m *Model) rebuildTable() {
 		rows[i] = table.Row(r.Cells)
 	}
 
+	// SetColumns/SetRows each immediately re-render every current row
+	// against whichever of (cols, rows) hasn't been updated yet — if the
+	// new column count differs from the old (e.g. Pods' 5 columns ->
+	// Config's 4), that intermediate render indexes past the shorter
+	// side and panics. Clear rows first so both calls only ever render
+	// against a matching pair.
+	m.tbl.SetRows(nil)
 	m.tbl.SetColumns(cols)
 	m.tbl.SetRows(rows)
 	// bubbles/table clamps the cursor down to -1 when a list goes empty
