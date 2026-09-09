@@ -142,19 +142,47 @@ func (m Model) renderOverview() string {
 	}
 	depHealth = styles.StatusStyle(depClass).Render(depHealth)
 
+	rsHealth := fmt.Sprintf("%d/%d healthy", o.ReplicaSetCount-o.ReplicaSetsBad, o.ReplicaSetCount)
+	rsClass := "ok"
+	if o.ReplicaSetsBad > 0 {
+		rsClass = "warn"
+	}
+	rsHealth = styles.StatusStyle(rsClass).Render(rsHealth)
+
 	rows := strings.Join([]string{
 		line("Health:", healthLine),
 		line("Nodes:", nodeHealth),
 		line("Namespaces:", fmt.Sprintf("%d", o.NamespaceCount)),
 		line("Pods:", fmt.Sprintf("%d total — %s", o.PodCount, podHealth)),
 		line("Deployments:", fmt.Sprintf("%d total — %s", o.DeploymentCount, depHealth)),
+		line("ReplicaSets:", fmt.Sprintf("%d active — %s", o.ReplicaSetCount, rsHealth)),
 		"",
 		line("CPU:", usageLine(o.CPUUsageMilli, o.CPUCapacityMilli, o.MetricsAvailable, o.MetricsErr, formatCores)),
 		line("Memory:", usageLine(o.MemUsageBytes, o.MemCapacityBytes, o.MetricsAvailable, o.MetricsErr, formatBytes)),
 	}, "\n")
 
-	return styles.Border.Padding(1, 2).Render(
-		lipgloss.JoinVertical(lipgloss.Left, styles.Title.Render("Cluster Overview"), "", rows))
+	body := lipgloss.JoinVertical(lipgloss.Left, styles.Title.Render("Cluster Overview"), "", rows)
+	if len(o.Issues) > 0 {
+		body = lipgloss.JoinVertical(lipgloss.Left, body, "", renderIssuesBlock(o))
+	}
+
+	return styles.Border.Padding(1, 2).Render(body)
+}
+
+// renderIssuesBlock lists the same capped/prioritized issues shown in the
+// always-visible summary strip (see renderSummaryBar), in full one-per-line
+// form for the Overview tab's roomier body.
+func renderIssuesBlock(o k8sres.Overview) string {
+	title := styles.ErrorText.Render(fmt.Sprintf("Issues (%d):", o.IssuesTotal))
+	lines := make([]string, 0, len(o.Issues)+2)
+	lines = append(lines, title)
+	for _, issue := range o.Issues {
+		lines = append(lines, "  "+issue)
+	}
+	if o.IssuesTotal > len(o.Issues) {
+		lines = append(lines, styles.Muted.Render(fmt.Sprintf("  … and %d more", o.IssuesTotal-len(o.Issues))))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 // usageLine renders one CPU/memory row: a colored usage bar plus

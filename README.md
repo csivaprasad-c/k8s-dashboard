@@ -27,7 +27,11 @@ It reads `$KUBECONFIG` (or `~/.kube/config` if unset), exactly like `kubectl`.
 2. **Connecting** — verifies the cluster is actually reachable
    (`ServerVersion`) before handing off, so a stale or unreachable context
    fails fast with a readable error instead of hanging.
-3. **Dashboard** — tabbed resource browser for the connected cluster.
+3. **Dashboard** — tabbed resource browser for the connected cluster. A
+   one-line cluster-health strip (pods/deployments/replicasets ready, plus
+   any prominent issues) sits above the tab bar on every tab, not just
+   Overview, and keeps refreshing in the background regardless of which
+   tab you're looking at.
 
 ## Keybindings (dashboard)
 

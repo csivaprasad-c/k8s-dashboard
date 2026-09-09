@@ -1053,6 +1053,20 @@ type Overview struct {
 	DeploymentCount int
 	DeploymentsBad  int
 
+	// ReplicaSetCount/Bad only count "active" replica sets (desired
+	// replicas > 0) — a Deployment keeps old, scaled-to-zero ReplicaSets
+	// around for rollback, and counting those would inflate the total
+	// with revisions nobody would call unhealthy.
+	ReplicaSetCount int
+	ReplicaSetsBad  int
+
+	// Issues is a capped list of human-readable, individually-actionable
+	// problems (failing pods, NotReady nodes) for the always-visible
+	// summary strip above the tab bar. IssuesTotal is the true count,
+	// which can exceed len(Issues).
+	Issues      []string
+	IssuesTotal int
+
 	// CPU/memory are aggregated across all nodes. Capacity comes from
 	// each node's allocatable resources; usage comes from metrics-server
 	// (metrics.k8s.io) and is only populated when MetricsAvailable is
@@ -1099,12 +1113,25 @@ func GetOverview(clientset *kubernetes.Clientset, metricsClient *metricsclientse
 	if err != nil {
 		return o, err
 	}
+	const maxIssuesShown = 5
+	addIssue := func(format string, args ...interface{}) {
+		o.IssuesTotal++
+		if len(o.Issues) < maxIssuesShown {
+			o.Issues = append(o.Issues, fmt.Sprintf(format, args...))
+		}
+	}
+
 	o.NodeCount = len(nodes.Items)
 	for _, n := range nodes.Items {
+		ready := false
 		for _, c := range n.Status.Conditions {
 			if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
+				ready = true
 				o.NodesReady++
 			}
+		}
+		if !ready {
+			addIssue("node/%s: NotReady", n.Name)
 		}
 		if cpu, ok := n.Status.Allocatable[corev1.ResourceCPU]; ok {
 			o.CPUCapacityMilli += cpu.MilliValue()
@@ -1144,7 +1171,8 @@ func GetOverview(clientset *kubernetes.Clientset, metricsClient *metricsclientse
 		return o, err
 	}
 	o.PodCount = len(pods.Items)
-	for _, p := range pods.Items {
+	for i := range pods.Items {
+		p := &pods.Items[i]
 		switch p.Status.Phase {
 		case corev1.PodRunning, corev1.PodSucceeded:
 			o.PodsRunning++
@@ -1152,6 +1180,9 @@ func GetOverview(clientset *kubernetes.Clientset, metricsClient *metricsclientse
 			o.PodsPending++
 		default:
 			o.PodsFailed++
+		}
+		if status, class := podStatus(p); class == "bad" {
+			addIssue("pod/%s/%s: %s", p.Namespace, p.Name, status)
 		}
 	}
 
@@ -1163,6 +1194,20 @@ func GetOverview(clientset *kubernetes.Clientset, metricsClient *metricsclientse
 	for _, d := range deps.Items {
 		if d.Status.ReadyReplicas < d.Status.Replicas {
 			o.DeploymentsBad++
+		}
+	}
+
+	rsList, err := clientset.AppsV1().ReplicaSets("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return o, err
+	}
+	for _, rs := range rsList.Items {
+		if rs.Spec.Replicas == nil || *rs.Spec.Replicas == 0 {
+			continue // scaled-to-zero revision kept for rollback, not "active"
+		}
+		o.ReplicaSetCount++
+		if rs.Status.ReadyReplicas < rs.Status.Replicas {
+			o.ReplicaSetsBad++
 		}
 	}
 

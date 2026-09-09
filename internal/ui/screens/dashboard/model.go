@@ -83,16 +83,21 @@ func New(session *kube.Session, version string) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.loadCmd(), tea.Tick(refreshInterval, func(time.Time) tea.Msg { return refreshTickMsg{} }))
+	cmds := []tea.Cmd{m.loadCmd(), tea.Tick(refreshInterval, func(time.Time) tea.Msg { return refreshTickMsg{} })}
+	if m.currentKind() != k8sres.KindOverview {
+		cmds = append(cmds, m.loadOverviewCmd())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) SetSize(w, h int) {
 	m.width, m.height = w, h
-	// Header + footer are 1 line each; the tab bar wraps to as many lines
-	// as it takes to fit every kind at this width (see renderTabs), so the
-	// table gets whatever's left rather than an assumed fixed amount.
+	// Header, summary strip, and footer are 1 line each; the tab bar wraps
+	// to as many lines as it takes to fit every kind at this width (see
+	// renderTabs), so the table gets whatever's left rather than an
+	// assumed fixed amount.
 	tabLines := tabLineCount(w)
-	bodyHeight := h - 2 - tabLines
+	bodyHeight := h - 3 - tabLines
 	if bodyHeight < 3 {
 		bodyHeight = 3
 	}
@@ -118,25 +123,39 @@ func (m Model) switchKind(idx int) (Model, tea.Cmd) {
 	// replaces or fails to replace them.
 	m.rows = nil
 	m.rebuildTable()
-	return m, m.loadCmd()
+	cmds := []tea.Cmd{m.loadCmd()}
+	if k8sres.Kinds[idx] != k8sres.KindOverview {
+		// The summary strip above the tab bar needs pods/deployments/
+		// replicasets/issues regardless of which tab is active; loadCmd
+		// only fetches that when Overview itself is the active tab.
+		cmds = append(cmds, m.loadOverviewCmd())
+	}
+	return m, tea.Batch(cmds...)
 }
 
 // loadCmd fetches whatever the active tab needs (overview summary or a
 // resource table) for the current namespace.
 func (m Model) loadCmd() tea.Cmd {
 	kind := m.currentKind()
-	session := m.session
-	ns := m.namespace
 	if kind == k8sres.KindOverview {
-		return func() tea.Msg {
-			ov, err := k8sres.GetOverview(session.Clientset, session.Metrics)
-			return overviewLoadedMsg{overview: ov, err: err}
-		}
+		return m.loadOverviewCmd()
 	}
 	clients := m.clients()
+	ns := m.namespace
 	return func() tea.Msg {
 		rows, err := k8sres.List(clients, kind, ns)
 		return rowsLoadedMsg{kind: kind, ns: ns, rows: rows, err: err}
+	}
+}
+
+// loadOverviewCmd fetches the pods/deployments/replicasets/issues summary
+// that backs both the Overview tab body and the always-visible strip above
+// the tab bar (see renderSummaryBar).
+func (m Model) loadOverviewCmd() tea.Cmd {
+	session := m.session
+	return func() tea.Msg {
+		ov, err := k8sres.GetOverview(session.Clientset, session.Metrics)
+		return overviewLoadedMsg{overview: ov, err: err}
 	}
 }
 
@@ -149,6 +168,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		cmds := []tea.Cmd{tea.Tick(refreshInterval, func(time.Time) tea.Msg { return refreshTickMsg{} })}
 		if m.active == overlayNone {
 			cmds = append(cmds, m.loadCmd())
+			if m.currentKind() != k8sres.KindOverview {
+				cmds = append(cmds, m.loadOverviewCmd())
+			}
 		}
 		return m, tea.Batch(cmds...)
 
@@ -168,17 +190,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case overviewLoadedMsg:
-		if m.currentKind() != k8sres.KindOverview {
-			return m, nil // stale response from a since-changed tab
-		}
-		m.loading = false
+		// Unlike rowsLoadedMsg, this arrives regardless of the active tab
+		// now — it also feeds the always-visible summary strip (see
+		// renderSummaryBar) — so m.overview/m.overviewErr always update.
+		// m.loading and m.lastLoaded specifically drive the *current
+		// tab's* body/footer, so those only move when Overview itself is
+		// the active tab.
 		if msg.err != nil {
 			m.overviewErr = msg.err.Error()
-			return m, nil
+		} else {
+			m.overviewErr = ""
+			m.overview = msg.overview
 		}
-		m.overviewErr = ""
-		m.overview = msg.overview
-		m.lastLoaded = time.Now()
+		if m.currentKind() == k8sres.KindOverview {
+			m.loading = false
+			m.lastLoaded = time.Now()
+		}
 		return m, nil
 
 	case namespacesLoadedMsg:
@@ -283,11 +310,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) View() string {
 	header := m.renderHeader()
+	summary := m.renderSummaryBar()
 	tabs := m.renderTabs()
 	body := m.renderBody()
 	footer := m.renderFooter()
 
-	base := lipglossJoin(header, tabs, body, footer)
+	base := lipglossJoin(header, summary, tabs, body, footer)
 	switch m.active {
 	case overlayNamespace:
 		return overlayOn(base, m.renderNamespaceOverlay(), m.width, m.height)
@@ -310,6 +338,56 @@ func (m Model) renderHeader() string {
 	txt := fmt.Sprintf("%s │ ctx: %s │ ns: %s │ %s │ %s connected",
 		m.session.Context.Cluster, m.session.Context.Name, m.namespace, m.version, dot)
 	return styles.HeaderBar.Width(max0(m.width)).Render(txt)
+}
+
+// renderSummaryBar is the cluster-health strip shown above the tab bar on
+// every tab, not just Overview — pods/deployments/replicasets at a glance,
+// plus any prominent issues, without leaving whatever you're looking at.
+// Backed by the same k8sres.Overview data as the Overview tab body (see
+// loadOverviewCmd), kept fresh independent of the active tab.
+func (m Model) renderSummaryBar() string {
+	if m.overviewErr != "" && m.overview.NodeCount == 0 {
+		return " " + styles.ErrorText.Render("cluster summary unavailable: "+m.overviewErr)
+	}
+	o := m.overview
+
+	depReady := o.DeploymentCount - o.DeploymentsBad
+	depClass := "ok"
+	if o.DeploymentsBad > 0 {
+		depClass = "warn"
+	}
+	rsReady := o.ReplicaSetCount - o.ReplicaSetsBad
+	rsClass := "ok"
+	if o.ReplicaSetsBad > 0 {
+		rsClass = "warn"
+	}
+	podClass := "ok"
+	if o.PodsFailed > 0 {
+		podClass = "bad"
+	} else if o.PodsPending > 0 {
+		podClass = "warn"
+	}
+
+	sep := styles.Muted.Render(" │ ")
+	stats := " " +
+		fmt.Sprintf("Pods %s", styles.StatusStyle(podClass).Render(fmt.Sprintf("%d/%d running", o.PodsRunning, o.PodCount))) + sep +
+		fmt.Sprintf("Deploy %s", styles.StatusStyle(depClass).Render(fmt.Sprintf("%d/%d ready", depReady, o.DeploymentCount))) + sep +
+		fmt.Sprintf("RS %s", styles.StatusStyle(rsClass).Render(fmt.Sprintf("%d/%d healthy", rsReady, o.ReplicaSetCount)))
+
+	var issues string
+	if o.IssuesTotal == 0 {
+		issues = styles.StatusStyle("ok").Render("✓ no issues")
+	} else {
+		short := styles.StatusStyle("bad").Render(fmt.Sprintf("⚠ %d issue(s)", o.IssuesTotal))
+		full := styles.StatusStyle("bad").Render(fmt.Sprintf("⚠ %d issue(s): %s", o.IssuesTotal, strings.Join(o.Issues, "; ")))
+		if lipgloss.Width(stats)+lipgloss.Width(sep)+lipgloss.Width(full) <= m.width {
+			issues = full
+		} else {
+			issues = short
+		}
+	}
+
+	return stats + sep + issues
 }
 
 // tabRows lays out every kind's rendered tab label into as many lines as it
