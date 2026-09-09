@@ -48,16 +48,28 @@ func List(clients Clients, kind Kind, namespace string) ([]Row, error) {
 		return listIngresses(ctx, cs, namespace)
 	case KindNetworkPolicies:
 		return listNetworkPolicies(ctx, cs, namespace)
+	case KindServiceAccounts:
+		return listServiceAccounts(ctx, cs, namespace)
+	case KindRoles:
+		return listRoles(ctx, cs, namespace)
+	case KindRoleBindings:
+		return listRoleBindings(ctx, cs, namespace)
 	case KindPV:
 		return listPVs(ctx, cs)
 	case KindPVC:
 		return listPVCs(ctx, cs, namespace)
 	case KindStorageClasses:
 		return listStorageClasses(ctx, cs)
+	case KindResourceQuotas:
+		return listResourceQuotas(ctx, cs, namespace)
+	case KindLimitRanges:
+		return listLimitRanges(ctx, cs, namespace)
 	case KindHPA:
 		return listHPAs(ctx, cs, namespace)
 	case KindVPA:
 		return listVPAs(ctx, clients.Dynamic, namespace)
+	case KindCRDs:
+		return listCRDs(ctx, clients.Dynamic)
 	case KindConfig:
 		return listConfig(ctx, cs, namespace)
 	case KindEvents:
@@ -556,6 +568,66 @@ func listNetworkPolicies(ctx context.Context, cs *kubernetes.Clientset, ns strin
 	return rows, nil
 }
 
+func listServiceAccounts(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.CoreV1().ServiceAccounts(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, sa := range list.Items {
+		rows = append(rows, Row{
+			Name:      sa.Name,
+			Namespace: sa.Namespace,
+			Cells:     []string{sa.Name, fmt.Sprintf("%d", len(sa.Secrets)), age(sa.CreationTimestamp.Time)},
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+func listRoles(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.RbacV1().Roles(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, r := range list.Items {
+		rows = append(rows, Row{
+			Name:      r.Name,
+			Namespace: r.Namespace,
+			Cells:     []string{r.Name, fmt.Sprintf("%d", len(r.Rules)), age(r.CreationTimestamp.Time)},
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+func listRoleBindings(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.RbacV1().RoleBindings(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, rb := range list.Items {
+		role := fmt.Sprintf("%s/%s", rb.RoleRef.Kind, rb.RoleRef.Name)
+		subjects := make([]string, 0, len(rb.Subjects))
+		for _, s := range rb.Subjects {
+			subjects = append(subjects, fmt.Sprintf("%s:%s", s.Kind, s.Name))
+		}
+		subjectStr := "<none>"
+		if len(subjects) > 0 {
+			subjectStr = strings.Join(subjects, ",")
+		}
+		rows = append(rows, Row{
+			Name:      rb.Name,
+			Namespace: rb.Namespace,
+			Cells:     []string{rb.Name, role, subjectStr, age(rb.CreationTimestamp.Time)},
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
 func listPVs(ctx context.Context, cs *kubernetes.Clientset) ([]Row, error) {
 	list, err := cs.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -656,6 +728,106 @@ func listStorageClasses(ctx context.Context, cs *kubernetes.Clientset) ([]Row, e
 	}
 	sortRows(rows)
 	return rows, nil
+}
+
+func listResourceQuotas(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.CoreV1().ResourceQuotas(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, rq := range list.Items {
+		names := make([]string, 0, len(rq.Status.Hard))
+		for k := range rq.Status.Hard {
+			names = append(names, string(k))
+		}
+		sort.Strings(names)
+		parts := make([]string, 0, len(names))
+		for _, name := range names {
+			hard := rq.Status.Hard[corev1.ResourceName(name)]
+			used := rq.Status.Used[corev1.ResourceName(name)]
+			parts = append(parts, fmt.Sprintf("%s: %s/%s", name, used.String(), hard.String()))
+		}
+		summary := "<none>"
+		if len(parts) > 0 {
+			summary = strings.Join(parts, ", ")
+		}
+		rows = append(rows, Row{
+			Name:      rq.Name,
+			Namespace: rq.Namespace,
+			Cells:     []string{rq.Name, summary, age(rq.CreationTimestamp.Time)},
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+func listLimitRanges(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.CoreV1().LimitRanges(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, lr := range list.Items {
+		summaries := make([]string, 0, len(lr.Spec.Limits))
+		for _, item := range lr.Spec.Limits {
+			summaries = append(summaries, limitRangeItemSummary(item))
+		}
+		summary := "<none>"
+		if len(summaries) > 0 {
+			summary = strings.Join(summaries, "; ")
+		}
+		rows = append(rows, Row{
+			Name:      lr.Name,
+			Namespace: lr.Namespace,
+			Cells:     []string{lr.Name, summary, age(lr.CreationTimestamp.Time)},
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+// limitRangeItemSummary renders one LimitRangeItem as e.g.
+// "Container cpu:100m-1,memory:128Mi-512Mi".
+func limitRangeItemSummary(item corev1.LimitRangeItem) string {
+	keySet := map[corev1.ResourceName]bool{}
+	for k := range item.Min {
+		keySet[k] = true
+	}
+	for k := range item.Max {
+		keySet[k] = true
+	}
+	for k := range item.Default {
+		keySet[k] = true
+	}
+	for k := range item.DefaultRequest {
+		keySet[k] = true
+	}
+	names := make([]string, 0, len(keySet))
+	for k := range keySet {
+		names = append(names, string(k))
+	}
+	sort.Strings(names)
+
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		rn := corev1.ResourceName(name)
+		minQ, hasMin := item.Min[rn]
+		maxQ, hasMax := item.Max[rn]
+		switch {
+		case hasMin && hasMax:
+			parts = append(parts, fmt.Sprintf("%s:%s-%s", name, minQ.String(), maxQ.String()))
+		case hasMax:
+			parts = append(parts, fmt.Sprintf("%s:<=%s", name, maxQ.String()))
+		case hasMin:
+			parts = append(parts, fmt.Sprintf("%s:>=%s", name, minQ.String()))
+		default:
+			if d, ok := item.Default[rn]; ok {
+				parts = append(parts, fmt.Sprintf("%s:%s", name, d.String()))
+			}
+		}
+	}
+	return fmt.Sprintf("%s %s", item.Type, strings.Join(parts, ","))
 }
 
 func listHPAs(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {

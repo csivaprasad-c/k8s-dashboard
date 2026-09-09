@@ -27,12 +27,24 @@ var deletableKinds = map[k8sres.Kind]bool{
 	k8sres.KindServices:        true,
 	k8sres.KindIngress:         true,
 	k8sres.KindNetworkPolicies: true,
+	k8sres.KindServiceAccounts: true,
+	k8sres.KindRoles:           true,
+	k8sres.KindRoleBindings:    true,
 	k8sres.KindPV:              true,
 	k8sres.KindPVC:             true,
 	k8sres.KindStorageClasses:  true,
+	k8sres.KindResourceQuotas:  true,
+	k8sres.KindLimitRanges:     true,
 	k8sres.KindHPA:             true,
 	k8sres.KindVPA:             true,
+	k8sres.KindCRDs:            true,
 	k8sres.KindConfig:          true,
+}
+
+// deleteWarnings adds an extra line to the confirm prompt for kinds whose
+// blast radius isn't obvious from the name alone.
+var deleteWarnings = map[k8sres.Kind]string{
+	k8sres.KindCRDs: "This deletes every custom resource of this type, cluster-wide.",
 }
 
 func (m Model) openDeleteConfirm() (Model, tea.Cmd) {
@@ -86,6 +98,10 @@ func (m Model) renderDeleteOverlay() string {
 	if m.dl.namespace == "" {
 		body = m.dl.name
 	}
+	warning := ""
+	if w, ok := deleteWarnings[m.dl.kind]; ok {
+		warning = "\n\n" + styles.ErrorText.Render(w)
+	}
 	status := ""
 	switch {
 	case m.dl.deleting:
@@ -94,5 +110,5 @@ func (m Model) renderDeleteOverlay() string {
 		status = "\n\n" + styles.ErrorText.Render(m.dl.err)
 	}
 	footer := "\n\n" + styles.StatusBar.Render("y confirm · n/esc cancel")
-	return styles.Border.Padding(1, 2).Render(title + "\n\n" + body + status + footer)
+	return styles.Border.Padding(1, 2).Render(title + "\n\n" + body + warning + status + footer)
 }

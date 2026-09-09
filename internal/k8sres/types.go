@@ -18,11 +18,17 @@ const (
 	KindServices
 	KindIngress
 	KindNetworkPolicies
+	KindServiceAccounts
+	KindRoles
+	KindRoleBindings
 	KindPV
 	KindPVC
 	KindStorageClasses
+	KindResourceQuotas
+	KindLimitRanges
 	KindHPA
 	KindVPA
+	KindCRDs
 	KindConfig // ConfigMaps + Secrets, listed together
 	KindEvents
 )
@@ -32,8 +38,10 @@ const (
 // Tab/Shift+Tab cycling in the dashboard).
 var Kinds = []Kind{
 	KindOverview, KindNodes, KindPods, KindDeployments, KindDaemonSets, KindStatefulSets,
-	KindJobs, KindCronJobs, KindServices, KindIngress, KindNetworkPolicies, KindPV, KindPVC,
-	KindStorageClasses, KindHPA, KindVPA, KindConfig, KindEvents,
+	KindJobs, KindCronJobs, KindServices, KindIngress, KindNetworkPolicies,
+	KindServiceAccounts, KindRoles, KindRoleBindings,
+	KindPV, KindPVC, KindStorageClasses, KindResourceQuotas, KindLimitRanges,
+	KindHPA, KindVPA, KindCRDs, KindConfig, KindEvents,
 }
 
 // Title is the tab label for a kind.
@@ -61,16 +69,28 @@ func (k Kind) Title() string {
 		return "Ingress"
 	case KindNetworkPolicies:
 		return "NetPol"
+	case KindServiceAccounts:
+		return "SvcAccount"
+	case KindRoles:
+		return "Role"
+	case KindRoleBindings:
+		return "RoleBinding"
 	case KindPV:
 		return "PV"
 	case KindPVC:
 		return "PVC"
 	case KindStorageClasses:
 		return "StorageClass"
+	case KindResourceQuotas:
+		return "ResourceQuota"
+	case KindLimitRanges:
+		return "LimitRange"
 	case KindHPA:
 		return "HPA"
 	case KindVPA:
 		return "VPA"
+	case KindCRDs:
+		return "CRD"
 	case KindConfig:
 		return "Cfg/Secrets"
 	case KindEvents:
@@ -84,7 +104,7 @@ func (k Kind) Title() string {
 // cluster-wide (false).
 func (k Kind) Namespaced() bool {
 	switch k {
-	case KindOverview, KindNodes, KindPV, KindStorageClasses:
+	case KindOverview, KindNodes, KindPV, KindStorageClasses, KindCRDs:
 		return false
 	default:
 		return true
@@ -114,16 +134,28 @@ func (k Kind) Columns() []string {
 		return []string{"NAME", "CLASS", "HOSTS", "ADDRESS", "PORTS", "AGE"}
 	case KindNetworkPolicies:
 		return []string{"NAME", "POD-SELECTOR", "AGE"}
+	case KindServiceAccounts:
+		return []string{"NAME", "SECRETS", "AGE"}
+	case KindRoles:
+		return []string{"NAME", "RULES", "AGE"}
+	case KindRoleBindings:
+		return []string{"NAME", "ROLE", "SUBJECTS", "AGE"}
 	case KindPV:
 		return []string{"NAME", "CAPACITY", "ACCESS MODES", "STATUS", "CLAIM", "STORAGECLASS", "AGE"}
 	case KindPVC:
 		return []string{"NAME", "STATUS", "VOLUME", "CAPACITY", "ACCESS MODES", "STORAGECLASS", "AGE"}
 	case KindStorageClasses:
 		return []string{"NAME", "PROVISIONER", "RECLAIMPOLICY", "VOLUMEBINDINGMODE", "ALLOWEXPANSION", "AGE"}
+	case KindResourceQuotas:
+		return []string{"NAME", "RESOURCES (USED/HARD)", "AGE"}
+	case KindLimitRanges:
+		return []string{"NAME", "LIMITS", "AGE"}
 	case KindHPA:
 		return []string{"NAME", "REFERENCE", "TARGETS", "MINPODS", "MAXPODS", "REPLICAS", "AGE"}
 	case KindVPA:
 		return []string{"NAME", "MODE", "TARGET", "CPU", "MEMORY", "AGE"}
+	case KindCRDs:
+		return []string{"NAME", "GROUP", "VERSIONS", "KIND", "SCOPE", "AGE"}
 	case KindConfig:
 		return []string{"NAME", "KIND", "DATA", "AGE"}
 	case KindEvents:

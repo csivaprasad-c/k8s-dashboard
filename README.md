@@ -3,9 +3,10 @@
 A terminal dashboard for Kubernetes. Pick a cluster from your kubeconfig,
 connect, and browse it live — nodes, workloads (pods, deployments,
 daemonsets, statefulsets, jobs, cronjobs), networking (services, ingresses,
-network policies), storage (persistent volumes/claims, storage classes),
-autoscaling (HPAs, VPAs), configmaps/secrets, and events — without leaving
-the terminal.
+network policies), RBAC (service accounts, roles, role bindings), storage
+(persistent volumes/claims, storage classes), governance (resource quotas,
+limit ranges), autoscaling (HPAs, VPAs), CRDs, configmaps/secrets, and
+events — without leaving the terminal.
 
 Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and
 [client-go](https://github.com/kubernetes/client-go).
@@ -71,11 +72,15 @@ internal/
   comes from `metrics.k8s.io` (metrics-server). If that add-on isn't
   installed in the cluster, usage falls back to a muted "not available"
   note rather than erroring — capacity/health still show either way.
-- Nodes, PersistentVolumes, and StorageClasses are cluster-scoped, so they
-  ignore the active namespace; every other tab is scoped to it.
+- Nodes, PersistentVolumes, StorageClasses, and CustomResourceDefinitions
+  are cluster-scoped, so they ignore the active namespace; every other tab
+  is scoped to it.
 - VerticalPodAutoscaler is a CRD from the separate
   [autoscaler](https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler)
-  project, not core Kubernetes, and often isn't installed. Its tab is read
-  generically via a dynamic client rather than pulling in that project's
-  typed client as a dependency; a cluster without the CRD just shows the
-  same "resource not found" error any missing API would.
+  project, not core Kubernetes, and often isn't installed. Its tab (and the
+  CRD tab itself) is read generically via a dynamic client rather than
+  pulling in a typed client as a dependency; a cluster without the CRD just
+  shows the same "resource not found" error any missing API would.
+- Deleting a CRD is far more destructive than deleting most other things
+  here — it cascades to every custom resource of that type, cluster-wide —
+  so its delete confirmation carries an extra warning line.

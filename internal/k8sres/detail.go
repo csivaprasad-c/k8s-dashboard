@@ -90,6 +90,27 @@ func GetYAML(clients Clients, kind Kind, namespace, name string) (string, error)
 		}
 		full.ManagedFields = nil
 		obj = full
+	case KindServiceAccounts:
+		full, e := clientset.CoreV1().ServiceAccounts(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindRoles:
+		full, e := clientset.RbacV1().Roles(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindRoleBindings:
+		full, e := clientset.RbacV1().RoleBindings(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
 	case KindPV:
 		full, e := clientset.CoreV1().PersistentVolumes().Get(ctx, name, metav1.GetOptions{})
 		if e != nil {
@@ -111,6 +132,20 @@ func GetYAML(clients Clients, kind Kind, namespace, name string) (string, error)
 		}
 		full.ManagedFields = nil
 		obj = full
+	case KindResourceQuotas:
+		full, e := clientset.CoreV1().ResourceQuotas(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindLimitRanges:
+		full, e := clientset.CoreV1().LimitRanges(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
 	case KindHPA:
 		full, e := clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(ctx, name, metav1.GetOptions{})
 		if e != nil {
@@ -120,6 +155,12 @@ func GetYAML(clients Clients, kind Kind, namespace, name string) (string, error)
 		obj = full
 	case KindVPA:
 		full, e := getVPAYAML(ctx, clients.Dynamic, namespace, name)
+		if e != nil {
+			return "", e
+		}
+		obj = full
+	case KindCRDs:
+		full, e := getCRDYAML(ctx, clients.Dynamic, name)
 		if e != nil {
 			return "", e
 		}
@@ -183,16 +224,28 @@ func Delete(clients Clients, kind Kind, namespace, name string) error {
 		return clientset.NetworkingV1().Ingresses(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindNetworkPolicies:
 		return clientset.NetworkingV1().NetworkPolicies(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindServiceAccounts:
+		return clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindRoles:
+		return clientset.RbacV1().Roles(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindRoleBindings:
+		return clientset.RbacV1().RoleBindings(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindPV:
 		return clientset.CoreV1().PersistentVolumes().Delete(ctx, name, metav1.DeleteOptions{})
 	case KindPVC:
 		return clientset.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindStorageClasses:
 		return clientset.StorageV1().StorageClasses().Delete(ctx, name, metav1.DeleteOptions{})
+	case KindResourceQuotas:
+		return clientset.CoreV1().ResourceQuotas(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindLimitRanges:
+		return clientset.CoreV1().LimitRanges(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindHPA:
 		return clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindVPA:
 		return deleteVPA(ctx, clients.Dynamic, namespace, name)
+	case KindCRDs:
+		return deleteCRD(ctx, clients.Dynamic, name)
 	case KindConfig:
 		if err := clientset.CoreV1().ConfigMaps(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err == nil {
 			return nil
