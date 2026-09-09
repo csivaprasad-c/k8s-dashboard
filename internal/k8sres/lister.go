@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 const listTimeout = 10 * time.Second
@@ -286,6 +287,46 @@ func ListNamespaces(clientset *kubernetes.Clientset) ([]string, error) {
 	return names, nil
 }
 
+// HealthStatus is a single-glance verdict on overall cluster health,
+// derived from the same counters shown on the Overview tab.
+type HealthStatus int
+
+const (
+	HealthUnknown HealthStatus = iota
+	HealthHealthy
+	HealthDegraded
+	HealthUnhealthy
+)
+
+// String is the label shown next to the health indicator.
+func (h HealthStatus) String() string {
+	switch h {
+	case HealthHealthy:
+		return "Healthy"
+	case HealthDegraded:
+		return "Degraded"
+	case HealthUnhealthy:
+		return "Unhealthy"
+	default:
+		return "Unknown"
+	}
+}
+
+// Class maps the status to a "ok"/"warn"/"bad" style class (see
+// styles.StatusStyle).
+func (h HealthStatus) Class() string {
+	switch h {
+	case HealthHealthy:
+		return "ok"
+	case HealthDegraded:
+		return "warn"
+	case HealthUnhealthy:
+		return "bad"
+	default:
+		return ""
+	}
+}
+
 // Overview summarizes cluster health for the Overview tab.
 type Overview struct {
 	NodeCount       int
@@ -297,13 +338,45 @@ type Overview struct {
 	PodsFailed      int
 	DeploymentCount int
 	DeploymentsBad  int
+
+	// CPU/memory are aggregated across all nodes. Capacity comes from
+	// each node's allocatable resources; usage comes from metrics-server
+	// (metrics.k8s.io) and is only populated when MetricsAvailable is
+	// true — that API is an optional cluster add-on, so its absence is
+	// expected and not an error.
+	CPUUsageMilli    int64
+	CPUCapacityMilli int64
+	MemUsageBytes    int64
+	MemCapacityBytes int64
+	MetricsAvailable bool
+
+	// MetricsErr holds why usage is unavailable (e.g. "metrics-server not
+	// installed"), for display purposes only.
+	MetricsErr string
+}
+
+// Health derives an overall verdict from the counters above: any node down
+// is Unhealthy; failed pods or an incompletely rolled out deployment is
+// Degraded; otherwise Healthy.
+func (o Overview) Health() HealthStatus {
+	if o.NodeCount == 0 {
+		return HealthUnknown
+	}
+	if o.NodesReady < o.NodeCount {
+		return HealthUnhealthy
+	}
+	if o.PodsFailed > 0 || o.DeploymentsBad > 0 || o.PodsPending > 0 {
+		return HealthDegraded
+	}
+	return HealthHealthy
 }
 
 // GetOverview gathers the summary counters. It makes a handful of list
 // calls scoped to the "" namespace (all namespaces) for pods/deployments so
 // the Overview tab always reflects the whole cluster, not just the active
-// namespace.
-func GetOverview(clientset *kubernetes.Clientset) (Overview, error) {
+// namespace. metricsClient may be nil, in which case CPU/memory usage is
+// simply left unavailable.
+func GetOverview(clientset *kubernetes.Clientset, metricsClient *metricsclientset.Clientset) (Overview, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 	defer cancel()
 	var o Overview
@@ -317,6 +390,31 @@ func GetOverview(clientset *kubernetes.Clientset) (Overview, error) {
 		for _, c := range n.Status.Conditions {
 			if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
 				o.NodesReady++
+			}
+		}
+		if cpu, ok := n.Status.Allocatable[corev1.ResourceCPU]; ok {
+			o.CPUCapacityMilli += cpu.MilliValue()
+		}
+		if mem, ok := n.Status.Allocatable[corev1.ResourceMemory]; ok {
+			o.MemCapacityBytes += mem.Value()
+		}
+	}
+
+	if metricsClient == nil {
+		o.MetricsErr = "metrics client not configured"
+	} else {
+		nodeMetrics, mErr := metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{})
+		if mErr != nil {
+			o.MetricsErr = "metrics-server not available"
+		} else {
+			o.MetricsAvailable = true
+			for _, nm := range nodeMetrics.Items {
+				if cpu, ok := nm.Usage[corev1.ResourceCPU]; ok {
+					o.CPUUsageMilli += cpu.MilliValue()
+				}
+				if mem, ok := nm.Usage[corev1.ResourceMemory]; ok {
+					o.MemUsageBytes += mem.Value()
+				}
 			}
 		}
 	}

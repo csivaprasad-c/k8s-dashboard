@@ -8,14 +8,21 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 // Session is a live connection to one cluster context: the resolved REST
-// config plus a ready-to-use typed clientset.
+// config plus ready-to-use clientsets.
 type Session struct {
 	Context   ClusterContext
 	Config    *rest.Config
 	Clientset *kubernetes.Clientset
+	// Metrics talks to the metrics.k8s.io API (metrics-server). Building
+	// this client never fails on its own — only calls against it do, if
+	// metrics-server isn't installed in the cluster — so callers should
+	// treat those call failures as "usage data unavailable", not a fatal
+	// connection error.
+	Metrics *metricsclientset.Clientset
 }
 
 // Connect builds a clientset for the named kubeconfig context. It does not
@@ -36,6 +43,11 @@ func Connect(contextName string) (*Session, error) {
 		return nil, fmt.Errorf("building clientset for context %q: %w", contextName, err)
 	}
 
+	metricsClient, err := metricsclientset.NewForConfig(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("building metrics client for context %q: %w", contextName, err)
+	}
+
 	contexts, err := LoadContexts()
 	if err != nil {
 		return nil, err
@@ -48,7 +60,7 @@ func Connect(contextName string) (*Session, error) {
 		}
 	}
 
-	return &Session{Context: cc, Config: restConfig, Clientset: clientset}, nil
+	return &Session{Context: cc, Config: restConfig, Clientset: clientset, Metrics: metricsClient}, nil
 }
 
 // Ping verifies the cluster is actually reachable and credentials are valid

@@ -105,6 +105,8 @@ func (m Model) renderBody() string {
 	return m.tbl.View()
 }
 
+const usageBarWidth = 24
+
 func (m Model) renderOverview() string {
 	if m.overviewErr != "" {
 		return styles.ErrorText.Render("error: " + m.overviewErr)
@@ -113,6 +115,10 @@ func (m Model) renderOverview() string {
 	line := func(label string, val string) string {
 		return fmt.Sprintf("%-14s %s", label, val)
 	}
+
+	health := o.Health()
+	healthLine := styles.StatusStyle(health.Class()).Bold(true).Render("● " + health.String())
+
 	podHealth := fmt.Sprintf("%d running · %d pending · %d failed", o.PodsRunning, o.PodsPending, o.PodsFailed)
 	if o.PodsFailed > 0 {
 		podHealth = styles.StatusStyle("bad").Render(podHealth)
@@ -137,12 +143,68 @@ func (m Model) renderOverview() string {
 	depHealth = styles.StatusStyle(depClass).Render(depHealth)
 
 	rows := strings.Join([]string{
+		line("Health:", healthLine),
 		line("Nodes:", nodeHealth),
 		line("Namespaces:", fmt.Sprintf("%d", o.NamespaceCount)),
 		line("Pods:", fmt.Sprintf("%d total — %s", o.PodCount, podHealth)),
 		line("Deployments:", fmt.Sprintf("%d total — %s", o.DeploymentCount, depHealth)),
+		"",
+		line("CPU:", usageLine(o.CPUUsageMilli, o.CPUCapacityMilli, o.MetricsAvailable, o.MetricsErr, formatCores)),
+		line("Memory:", usageLine(o.MemUsageBytes, o.MemCapacityBytes, o.MetricsAvailable, o.MetricsErr, formatBytes)),
 	}, "\n")
 
 	return styles.Border.Padding(1, 2).Render(
 		lipgloss.JoinVertical(lipgloss.Left, styles.Title.Render("Cluster Overview"), "", rows))
+}
+
+// usageLine renders one CPU/memory row: a colored usage bar plus
+// "used / capacity (pct%)", or a muted explanation when metrics-server
+// (the metrics.k8s.io API) isn't available to report usage.
+func usageLine(usage, capacity int64, available bool, unavailableReason string, format func(int64) string) string {
+	if !available || capacity <= 0 {
+		reason := unavailableReason
+		if reason == "" {
+			reason = "unavailable"
+		}
+		return styles.Muted.Render(fmt.Sprintf("capacity %s · usage %s", format(capacity), reason))
+	}
+	pct := float64(usage) / float64(capacity) * 100
+	return fmt.Sprintf("%s  %s / %s (%.0f%%)", usageBar(pct), format(usage), format(capacity), pct)
+}
+
+func usageClass(pct float64) string {
+	switch {
+	case pct >= 90:
+		return "bad"
+	case pct >= 70:
+		return "warn"
+	default:
+		return "ok"
+	}
+}
+
+func usageBar(pct float64) string {
+	filled := int(pct / 100 * usageBarWidth)
+	filled = max(0, min(filled, usageBarWidth))
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", usageBarWidth-filled)
+	return styles.StatusStyle(usageClass(pct)).Render(bar)
+}
+
+func formatCores(milli int64) string {
+	return fmt.Sprintf("%.2f cores", float64(milli)/1000)
+}
+
+// formatBytes renders a byte count using binary (Ki/Mi/Gi) units, matching
+// kubectl's convention for resource quantities.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }

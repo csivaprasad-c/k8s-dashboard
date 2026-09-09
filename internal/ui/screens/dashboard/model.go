@@ -102,7 +102,7 @@ func (m Model) loadCmd() tea.Cmd {
 	ns := m.namespace
 	if kind == k8sres.KindOverview {
 		return func() tea.Msg {
-			ov, err := k8sres.GetOverview(session.Clientset)
+			ov, err := k8sres.GetOverview(session.Clientset, session.Metrics)
 			return overviewLoadedMsg{overview: ov, err: err}
 		}
 	}
