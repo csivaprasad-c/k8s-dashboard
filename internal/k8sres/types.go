@@ -12,12 +12,19 @@ const (
 	KindPods
 	KindDeployments
 	KindServices
+	KindIngress
+	KindPV
+	KindPVC
 	KindConfig // ConfigMaps + Secrets, listed together
 	KindEvents
 )
 
-// Kinds is the fixed tab order shown in the dashboard header.
-var Kinds = []Kind{KindOverview, KindNodes, KindPods, KindDeployments, KindServices, KindConfig, KindEvents}
+// Kinds is the fixed tab order shown in the dashboard header. Its length is
+// assumed to be at most 10 elsewhere (the dashboard maps it to keys 1-9,0).
+var Kinds = []Kind{
+	KindOverview, KindNodes, KindPods, KindDeployments, KindServices,
+	KindIngress, KindPV, KindPVC, KindConfig, KindEvents,
+}
 
 // Title is the tab label for a kind.
 func (k Kind) Title() string {
@@ -32,6 +39,12 @@ func (k Kind) Title() string {
 		return "Deploy"
 	case KindServices:
 		return "Svc"
+	case KindIngress:
+		return "Ingress"
+	case KindPV:
+		return "PV"
+	case KindPVC:
+		return "PVC"
 	case KindConfig:
 		return "Cfg/Secrets"
 	case KindEvents:
@@ -44,7 +57,7 @@ func (k Kind) Title() string {
 // Namespaced reports whether the kind is scoped to a namespace (true) or
 // cluster-wide (false).
 func (k Kind) Namespaced() bool {
-	return k != KindNodes && k != KindOverview
+	return k != KindNodes && k != KindPV && k != KindOverview
 }
 
 // Columns returns the table header for a kind's row data.
@@ -57,7 +70,13 @@ func (k Kind) Columns() []string {
 	case KindDeployments:
 		return []string{"NAME", "READY", "UP-TO-DATE", "AVAILABLE", "AGE"}
 	case KindServices:
-		return []string{"NAME", "TYPE", "CLUSTER-IP", "PORT(S)", "AGE"}
+		return []string{"NAME", "TYPE", "CLUSTER-IP", "EXTERNAL-IP", "PORT(S)", "AGE"}
+	case KindIngress:
+		return []string{"NAME", "CLASS", "HOSTS", "ADDRESS", "PORTS", "AGE"}
+	case KindPV:
+		return []string{"NAME", "CAPACITY", "ACCESS MODES", "STATUS", "CLAIM", "STORAGECLASS", "AGE"}
+	case KindPVC:
+		return []string{"NAME", "STATUS", "VOLUME", "CAPACITY", "ACCESS MODES", "STORAGECLASS", "AGE"}
 	case KindConfig:
 		return []string{"NAME", "KIND", "DATA", "AGE"}
 	case KindEvents:

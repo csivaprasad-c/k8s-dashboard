@@ -1,8 +1,9 @@
 # k8sdash
 
 A terminal dashboard for Kubernetes. Pick a cluster from your kubeconfig,
-connect, and browse it live — nodes, pods, deployments, services,
-configmaps/secrets, and events — without leaving the terminal.
+connect, and browse it live — nodes, pods, deployments, services, ingresses,
+persistent volumes/claims, configmaps/secrets, and events — without leaving
+the terminal.
 
 Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and
 [client-go](https://github.com/kubernetes/client-go).
@@ -29,7 +30,7 @@ It reads `$KUBECONFIG` (or `~/.kube/config` if unset), exactly like `kubectl`.
 
 | Key | Action |
 |---|---|
-| `1`-`7` / `Tab` / `Shift+Tab` | Switch resource tab (Overview, Nodes, Pods, Deploy, Svc, Cfg/Secrets, Events) |
+| `1`-`9`, `0` / `Tab` / `Shift+Tab` | Switch resource tab (Overview, Nodes, Pods, Deploy, Svc, Ingress, PV, PVC, Cfg/Secrets, Events — `0` selects the 10th) |
 | `↑`/`↓` | Move selection |
 | `/` | Filter the current table by name |
 | `n` | Switch namespace |
@@ -63,3 +64,9 @@ internal/
   be the natural next step for push-based updates.
 - The YAML detail view redacts Secret values (keys/lengths are still
   visible) and strips `managedFields` for readability.
+- CPU/memory usage (Overview tab and the Nodes tab's CPU/MEMORY columns)
+  comes from `metrics.k8s.io` (metrics-server). If that add-on isn't
+  installed in the cluster, usage falls back to a muted "not available"
+  note rather than erroring — capacity/health still show either way.
+- Nodes and PersistentVolumes are cluster-scoped, so they ignore the
+  active namespace; every other tab is scoped to it.

@@ -48,6 +48,27 @@ func GetYAML(clientset *kubernetes.Clientset, kind Kind, namespace, name string)
 		}
 		full.ManagedFields = nil
 		obj = full
+	case KindIngress:
+		full, e := clientset.NetworkingV1().Ingresses(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindPV:
+		full, e := clientset.CoreV1().PersistentVolumes().Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindPVC:
+		full, e := clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
 	case KindConfig:
 		// Try ConfigMap first, then Secret.
 		if cm, e := clientset.CoreV1().ConfigMaps(namespace).Get(ctx, name, metav1.GetOptions{}); e == nil {
@@ -94,6 +115,12 @@ func Delete(clientset *kubernetes.Clientset, kind Kind, namespace, name string) 
 		return clientset.AppsV1().Deployments(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindServices:
 		return clientset.CoreV1().Services(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindIngress:
+		return clientset.NetworkingV1().Ingresses(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindPV:
+		return clientset.CoreV1().PersistentVolumes().Delete(ctx, name, metav1.DeleteOptions{})
+	case KindPVC:
+		return clientset.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindConfig:
 		if err := clientset.CoreV1().ConfigMaps(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err == nil {
 			return nil

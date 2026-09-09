@@ -33,6 +33,12 @@ func List(clientset *kubernetes.Clientset, metricsClient *metricsclientset.Clien
 		return listDeployments(ctx, clientset, namespace)
 	case KindServices:
 		return listServices(ctx, clientset, namespace)
+	case KindIngress:
+		return listIngresses(ctx, clientset, namespace)
+	case KindPV:
+		return listPVs(ctx, clientset)
+	case KindPVC:
+		return listPVCs(ctx, clientset, namespace)
 	case KindConfig:
 		return listConfig(ctx, clientset, namespace)
 	case KindEvents:
@@ -265,12 +271,37 @@ func listServices(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]R
 			Name:      s.Name,
 			Namespace: s.Namespace,
 			Cells: []string{
-				s.Name, string(s.Spec.Type), s.Spec.ClusterIP, strings.Join(ports, ","), age(s.CreationTimestamp.Time),
+				s.Name, string(s.Spec.Type), s.Spec.ClusterIP, serviceExternalIP(s), strings.Join(ports, ","), age(s.CreationTimestamp.Time),
 			},
 		})
 	}
 	sortRows(rows)
 	return rows, nil
+}
+
+// serviceExternalIP renders the EXTERNAL-IP column the way kubectl does:
+// the ExternalName for that service type, the load balancer's assigned
+// IP(s)/hostname(s) (or "<pending>" before one is assigned), or "<none>".
+func serviceExternalIP(s corev1.Service) string {
+	switch s.Spec.Type {
+	case corev1.ServiceTypeExternalName:
+		return s.Spec.ExternalName
+	case corev1.ServiceTypeLoadBalancer:
+		var addrs []string
+		for _, ing := range s.Status.LoadBalancer.Ingress {
+			if ing.IP != "" {
+				addrs = append(addrs, ing.IP)
+			} else if ing.Hostname != "" {
+				addrs = append(addrs, ing.Hostname)
+			}
+		}
+		if len(addrs) == 0 {
+			return "<pending>"
+		}
+		return strings.Join(addrs, ",")
+	default:
+		return "<none>"
+	}
 }
 
 func listConfig(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
@@ -297,6 +328,182 @@ func listConfig(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row
 	}
 	sortRows(rows)
 	return rows, nil
+}
+
+func listIngresses(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.NetworkingV1().Ingresses(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, ing := range list.Items {
+		class := "<none>"
+		if ing.Spec.IngressClassName != nil {
+			class = *ing.Spec.IngressClassName
+		}
+
+		hostSet := map[string]bool{}
+		for _, r := range ing.Spec.Rules {
+			if r.Host != "" {
+				hostSet[r.Host] = true
+			}
+		}
+		hosts := "*"
+		if len(hostSet) > 0 {
+			var hostList []string
+			for h := range hostSet {
+				hostList = append(hostList, h)
+			}
+			sort.Strings(hostList)
+			hosts = strings.Join(hostList, ",")
+		}
+
+		var addrs []string
+		for _, a := range ing.Status.LoadBalancer.Ingress {
+			if a.IP != "" {
+				addrs = append(addrs, a.IP)
+			} else if a.Hostname != "" {
+				addrs = append(addrs, a.Hostname)
+			}
+		}
+		address := "-"
+		if len(addrs) > 0 {
+			address = strings.Join(addrs, ",")
+		}
+
+		ports := "80"
+		if len(ing.Spec.TLS) > 0 {
+			ports = "80, 443"
+		}
+
+		rows = append(rows, Row{
+			Name:      ing.Name,
+			Namespace: ing.Namespace,
+			Cells:     []string{ing.Name, class, hosts, address, ports, age(ing.CreationTimestamp.Time)},
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+func listPVs(ctx context.Context, cs *kubernetes.Clientset) ([]Row, error) {
+	list, err := cs.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, pv := range list.Items {
+		class := pvPhaseClass(pv.Status.Phase)
+		capacity := "-"
+		if q, ok := pv.Spec.Capacity[corev1.ResourceStorage]; ok {
+			capacity = formatBytesCompact(q.Value())
+		}
+		claim := "-"
+		if pv.Spec.ClaimRef != nil {
+			claim = pv.Spec.ClaimRef.Namespace + "/" + pv.Spec.ClaimRef.Name
+		}
+		storageClass := pv.Spec.StorageClassName
+		if storageClass == "" {
+			storageClass = "-"
+		}
+		rows = append(rows, Row{
+			Name: pv.Name,
+			Cells: []string{
+				pv.Name, capacity, formatAccessModes(pv.Spec.AccessModes),
+				string(pv.Status.Phase), claim, storageClass, age(pv.CreationTimestamp.Time),
+			},
+			StatusClass: class,
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+func listPVCs(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.CoreV1().PersistentVolumeClaims(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, pvc := range list.Items {
+		class := pvcPhaseClass(pvc.Status.Phase)
+		capacity := "-"
+		if q, ok := pvc.Status.Capacity[corev1.ResourceStorage]; ok {
+			capacity = formatBytesCompact(q.Value())
+		}
+		volume := pvc.Spec.VolumeName
+		if volume == "" {
+			volume = "-"
+		}
+		storageClass := "-"
+		if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
+			storageClass = *pvc.Spec.StorageClassName
+		}
+		accessModes := pvc.Status.AccessModes
+		if len(accessModes) == 0 {
+			accessModes = pvc.Spec.AccessModes
+		}
+		rows = append(rows, Row{
+			Name:      pvc.Name,
+			Namespace: pvc.Namespace,
+			Cells: []string{
+				pvc.Name, string(pvc.Status.Phase), volume, capacity, formatAccessModes(accessModes), storageClass, age(pvc.CreationTimestamp.Time),
+			},
+			StatusClass: class,
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+func pvPhaseClass(phase corev1.PersistentVolumePhase) string {
+	switch phase {
+	case corev1.VolumeBound, corev1.VolumeAvailable:
+		return "ok"
+	case corev1.VolumePending:
+		return "warn"
+	case corev1.VolumeReleased, corev1.VolumeFailed:
+		return "bad"
+	default:
+		return ""
+	}
+}
+
+func pvcPhaseClass(phase corev1.PersistentVolumeClaimPhase) string {
+	switch phase {
+	case corev1.ClaimBound:
+		return "ok"
+	case corev1.ClaimPending:
+		return "warn"
+	case corev1.ClaimLost:
+		return "bad"
+	default:
+		return ""
+	}
+}
+
+// formatAccessModes renders access modes using kubectl's short codes
+// (RWO/ROX/RWX/RWOP).
+func formatAccessModes(modes []corev1.PersistentVolumeAccessMode) string {
+	if len(modes) == 0 {
+		return "-"
+	}
+	codes := make([]string, 0, len(modes))
+	for _, m := range modes {
+		switch m {
+		case corev1.ReadWriteOnce:
+			codes = append(codes, "RWO")
+		case corev1.ReadOnlyMany:
+			codes = append(codes, "ROX")
+		case corev1.ReadWriteMany:
+			codes = append(codes, "RWX")
+		case corev1.ReadWriteOncePod:
+			codes = append(codes, "RWOP")
+		default:
+			codes = append(codes, string(m))
+		}
+	}
+	return strings.Join(codes, ",")
 }
 
 func listEvents(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {

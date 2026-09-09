@@ -21,6 +21,9 @@ var deletableKinds = map[k8sres.Kind]bool{
 	k8sres.KindPods:        true,
 	k8sres.KindDeployments: true,
 	k8sres.KindServices:    true,
+	k8sres.KindIngress:     true,
+	k8sres.KindPV:          true,
+	k8sres.KindPVC:         true,
 	k8sres.KindConfig:      true,
 }
 

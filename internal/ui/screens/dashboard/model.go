@@ -225,8 +225,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.filterInput.Focus()
 			return m, textinput.Blink
 		}
-	case "1", "2", "3", "4", "5", "6", "7":
-		idx := int(msg.String()[0] - '1')
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
+		// Keys 1-9 select tabs 1-9; 0 selects the 10th tab, matching the
+		// numbering shown in the tab bar (see tabKeyLabel).
+		idx := 9
+		if msg.String() != "0" {
+			idx = int(msg.String()[0] - '1')
+		}
 		if idx < len(k8sres.Kinds) {
 			m.kindIdx = idx
 			m.filterInput.SetValue("")
@@ -289,10 +294,20 @@ func (m Model) renderHeader() string {
 	return styles.HeaderBar.Width(max0(m.width)).Render(txt)
 }
 
+// tabKeyLabel is the key that selects the tab at index i: "1"-"9" for the
+// first nine tabs, then "0" for a tenth (see the "1".."9","0" key handling
+// in handleKey).
+func tabKeyLabel(i int) string {
+	if i < 9 {
+		return fmt.Sprintf("%d", i+1)
+	}
+	return "0"
+}
+
 func (m Model) renderTabs() string {
 	var b strings.Builder
 	for i, k := range k8sres.Kinds {
-		label := fmt.Sprintf("%d:%s", i+1, k.Title())
+		label := tabKeyLabel(i) + ":" + k.Title()
 		if i == m.kindIdx {
 			b.WriteString(styles.TabActive.Render(label))
 		} else {
