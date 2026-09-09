@@ -5,16 +5,16 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
 )
 
 // GetYAML fetches a single object and renders it as YAML for the detail
 // overlay. It clears ManagedFields, which are voluminous and rarely useful
 // in a quick-look pane.
-func GetYAML(clientset *kubernetes.Clientset, kind Kind, namespace, name string) (string, error) {
+func GetYAML(clients Clients, kind Kind, namespace, name string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 	defer cancel()
+	clientset := clients.Core
 
 	var obj interface{}
 	var err error
@@ -41,6 +41,34 @@ func GetYAML(clientset *kubernetes.Clientset, kind Kind, namespace, name string)
 		}
 		full.ManagedFields = nil
 		obj = full
+	case KindDaemonSets:
+		full, e := clientset.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindStatefulSets:
+		full, e := clientset.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindJobs:
+		full, e := clientset.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindCronJobs:
+		full, e := clientset.BatchV1().CronJobs(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
 	case KindServices:
 		full, e := clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 		if e != nil {
@@ -50,6 +78,13 @@ func GetYAML(clientset *kubernetes.Clientset, kind Kind, namespace, name string)
 		obj = full
 	case KindIngress:
 		full, e := clientset.NetworkingV1().Ingresses(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindNetworkPolicies:
+		full, e := clientset.NetworkingV1().NetworkPolicies(namespace).Get(ctx, name, metav1.GetOptions{})
 		if e != nil {
 			return "", e
 		}
@@ -68,6 +103,26 @@ func GetYAML(clientset *kubernetes.Clientset, kind Kind, namespace, name string)
 			return "", e
 		}
 		full.ManagedFields = nil
+		obj = full
+	case KindStorageClasses:
+		full, e := clientset.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindHPA:
+		full, e := clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(ctx, name, metav1.GetOptions{})
+		if e != nil {
+			return "", e
+		}
+		full.ManagedFields = nil
+		obj = full
+	case KindVPA:
+		full, e := getVPAYAML(ctx, clients.Dynamic, namespace, name)
+		if e != nil {
+			return "", e
+		}
 		obj = full
 	case KindConfig:
 		// Try ConfigMap first, then Secret.
@@ -104,23 +159,40 @@ func GetYAML(clientset *kubernetes.Clientset, kind Kind, namespace, name string)
 
 // Delete removes a single object. Callers are expected to confirm with the
 // user before invoking this — it does not ask.
-func Delete(clientset *kubernetes.Clientset, kind Kind, namespace, name string) error {
+func Delete(clients Clients, kind Kind, namespace, name string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 	defer cancel()
+	clientset := clients.Core
 
 	switch kind {
 	case KindPods:
 		return clientset.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindDeployments:
 		return clientset.AppsV1().Deployments(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindDaemonSets:
+		return clientset.AppsV1().DaemonSets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindStatefulSets:
+		return clientset.AppsV1().StatefulSets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindJobs:
+		return clientset.BatchV1().Jobs(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindCronJobs:
+		return clientset.BatchV1().CronJobs(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindServices:
 		return clientset.CoreV1().Services(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindIngress:
 		return clientset.NetworkingV1().Ingresses(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindNetworkPolicies:
+		return clientset.NetworkingV1().NetworkPolicies(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	case KindPV:
 		return clientset.CoreV1().PersistentVolumes().Delete(ctx, name, metav1.DeleteOptions{})
 	case KindPVC:
 		return clientset.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindStorageClasses:
+		return clientset.StorageV1().StorageClasses().Delete(ctx, name, metav1.DeleteOptions{})
+	case KindHPA:
+		return clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	case KindVPA:
+		return deleteVPA(ctx, clients.Dynamic, namespace, name)
 	case KindConfig:
 		if err := clientset.CoreV1().ConfigMaps(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err == nil {
 			return nil

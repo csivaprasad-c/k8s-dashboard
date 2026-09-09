@@ -11,19 +11,29 @@ const (
 	KindNodes
 	KindPods
 	KindDeployments
+	KindDaemonSets
+	KindStatefulSets
+	KindJobs
+	KindCronJobs
 	KindServices
 	KindIngress
+	KindNetworkPolicies
 	KindPV
 	KindPVC
+	KindStorageClasses
+	KindHPA
+	KindVPA
 	KindConfig // ConfigMaps + Secrets, listed together
 	KindEvents
 )
 
-// Kinds is the fixed tab order shown in the dashboard header. Its length is
-// assumed to be at most 10 elsewhere (the dashboard maps it to keys 1-9,0).
+// Kinds is the fixed tab order shown in the dashboard header. There are too
+// many to bind one key per tab (see the ":" jump-to-resource overlay and
+// Tab/Shift+Tab cycling in the dashboard).
 var Kinds = []Kind{
-	KindOverview, KindNodes, KindPods, KindDeployments, KindServices,
-	KindIngress, KindPV, KindPVC, KindConfig, KindEvents,
+	KindOverview, KindNodes, KindPods, KindDeployments, KindDaemonSets, KindStatefulSets,
+	KindJobs, KindCronJobs, KindServices, KindIngress, KindNetworkPolicies, KindPV, KindPVC,
+	KindStorageClasses, KindHPA, KindVPA, KindConfig, KindEvents,
 }
 
 // Title is the tab label for a kind.
@@ -37,14 +47,30 @@ func (k Kind) Title() string {
 		return "Pods"
 	case KindDeployments:
 		return "Deploy"
+	case KindDaemonSets:
+		return "DaemonSet"
+	case KindStatefulSets:
+		return "StatefulSet"
+	case KindJobs:
+		return "Job"
+	case KindCronJobs:
+		return "CronJob"
 	case KindServices:
 		return "Svc"
 	case KindIngress:
 		return "Ingress"
+	case KindNetworkPolicies:
+		return "NetPol"
 	case KindPV:
 		return "PV"
 	case KindPVC:
 		return "PVC"
+	case KindStorageClasses:
+		return "StorageClass"
+	case KindHPA:
+		return "HPA"
+	case KindVPA:
+		return "VPA"
 	case KindConfig:
 		return "Cfg/Secrets"
 	case KindEvents:
@@ -57,7 +83,12 @@ func (k Kind) Title() string {
 // Namespaced reports whether the kind is scoped to a namespace (true) or
 // cluster-wide (false).
 func (k Kind) Namespaced() bool {
-	return k != KindNodes && k != KindPV && k != KindOverview
+	switch k {
+	case KindOverview, KindNodes, KindPV, KindStorageClasses:
+		return false
+	default:
+		return true
+	}
 }
 
 // Columns returns the table header for a kind's row data.
@@ -69,14 +100,30 @@ func (k Kind) Columns() []string {
 		return []string{"NAME", "READY", "STATUS", "RESTARTS", "AGE"}
 	case KindDeployments:
 		return []string{"NAME", "READY", "UP-TO-DATE", "AVAILABLE", "AGE"}
+	case KindDaemonSets:
+		return []string{"NAME", "DESIRED", "CURRENT", "READY", "UP-TO-DATE", "AVAILABLE", "AGE"}
+	case KindStatefulSets:
+		return []string{"NAME", "READY", "AGE"}
+	case KindJobs:
+		return []string{"NAME", "COMPLETIONS", "DURATION", "AGE"}
+	case KindCronJobs:
+		return []string{"NAME", "SCHEDULE", "SUSPEND", "ACTIVE", "LAST SCHEDULE", "AGE"}
 	case KindServices:
 		return []string{"NAME", "TYPE", "CLUSTER-IP", "EXTERNAL-IP", "PORT(S)", "AGE"}
 	case KindIngress:
 		return []string{"NAME", "CLASS", "HOSTS", "ADDRESS", "PORTS", "AGE"}
+	case KindNetworkPolicies:
+		return []string{"NAME", "POD-SELECTOR", "AGE"}
 	case KindPV:
 		return []string{"NAME", "CAPACITY", "ACCESS MODES", "STATUS", "CLAIM", "STORAGECLASS", "AGE"}
 	case KindPVC:
 		return []string{"NAME", "STATUS", "VOLUME", "CAPACITY", "ACCESS MODES", "STORAGECLASS", "AGE"}
+	case KindStorageClasses:
+		return []string{"NAME", "PROVISIONER", "RECLAIMPOLICY", "VOLUMEBINDINGMODE", "ALLOWEXPANSION", "AGE"}
+	case KindHPA:
+		return []string{"NAME", "REFERENCE", "TARGETS", "MINPODS", "MAXPODS", "REPLICAS", "AGE"}
+	case KindVPA:
+		return []string{"NAME", "MODE", "TARGET", "CPU", "MEMORY", "AGE"}
 	case KindConfig:
 		return []string{"NAME", "KIND", "DATA", "AGE"}
 	case KindEvents:

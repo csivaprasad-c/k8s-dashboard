@@ -18,13 +18,21 @@ type deleteState struct {
 }
 
 var deletableKinds = map[k8sres.Kind]bool{
-	k8sres.KindPods:        true,
-	k8sres.KindDeployments: true,
-	k8sres.KindServices:    true,
-	k8sres.KindIngress:     true,
-	k8sres.KindPV:          true,
-	k8sres.KindPVC:         true,
-	k8sres.KindConfig:      true,
+	k8sres.KindPods:            true,
+	k8sres.KindDeployments:     true,
+	k8sres.KindDaemonSets:      true,
+	k8sres.KindStatefulSets:    true,
+	k8sres.KindJobs:            true,
+	k8sres.KindCronJobs:        true,
+	k8sres.KindServices:        true,
+	k8sres.KindIngress:         true,
+	k8sres.KindNetworkPolicies: true,
+	k8sres.KindPV:              true,
+	k8sres.KindPVC:             true,
+	k8sres.KindStorageClasses:  true,
+	k8sres.KindHPA:             true,
+	k8sres.KindVPA:             true,
+	k8sres.KindConfig:          true,
 }
 
 func (m Model) openDeleteConfirm() (Model, tea.Cmd) {
@@ -49,9 +57,9 @@ func (m Model) updateDeleteKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "y":
 		m.dl.deleting = true
 		kind, ns, name := m.dl.kind, m.dl.namespace, m.dl.name
-		cs := m.session.Clientset
+		clients := m.clients()
 		return m, func() tea.Msg {
-			err := k8sres.Delete(cs, kind, ns, name)
+			err := k8sres.Delete(clients, kind, ns, name)
 			return deleteResultMsg{err: err}
 		}
 	case "n", "esc":

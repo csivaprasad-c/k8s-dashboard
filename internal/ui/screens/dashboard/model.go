@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/csivaprasad/k8s-dashboard/internal/k8sres"
 	"github.com/csivaprasad/k8s-dashboard/internal/kube"
@@ -24,6 +25,7 @@ type overlay int
 const (
 	overlayNone overlay = iota
 	overlayNamespace
+	overlayResource
 	overlayDetail
 	overlayLogs
 	overlayHelp
@@ -54,9 +56,15 @@ type Model struct {
 	active overlay
 
 	ns namespaceState
+	rp resourceState
 	dt detailState
 	lg logsState
 	dl deleteState
+}
+
+// clients bundles the session's clientsets for k8sres calls.
+func (m Model) clients() k8sres.Clients {
+	return k8sres.Clients{Core: m.session.Clientset, Metrics: m.session.Metrics, Dynamic: m.session.Dynamic}
 }
 
 func New(session *kube.Session, version string) Model {
@@ -80,7 +88,11 @@ func (m Model) Init() tea.Cmd {
 
 func (m *Model) SetSize(w, h int) {
 	m.width, m.height = w, h
-	bodyHeight := h - 6
+	// Header + footer are 1 line each; the tab bar wraps to as many lines
+	// as it takes to fit every kind at this width (see renderTabs), so the
+	// table gets whatever's left rather than an assumed fixed amount.
+	tabLines := tabLineCount(w)
+	bodyHeight := h - 2 - tabLines
 	if bodyHeight < 3 {
 		bodyHeight = 3
 	}
@@ -94,6 +106,21 @@ func (m *Model) SetSize(w, h int) {
 
 func (m Model) currentKind() k8sres.Kind { return k8sres.Kinds[m.kindIdx] }
 
+// switchKind jumps to the tab at idx (from Tab/Shift+Tab cycling or the ":"
+// resource picker), clearing the row filter and kicking off a fresh load.
+func (m Model) switchKind(idx int) (Model, tea.Cmd) {
+	m.kindIdx = idx
+	m.filterInput.SetValue("")
+	m.loading = true
+	m.loadErr = ""
+	// Clear the previous tab's rows now rather than leaving them on
+	// screen (with the wrong column headers) until the new load either
+	// replaces or fails to replace them.
+	m.rows = nil
+	m.rebuildTable()
+	return m, m.loadCmd()
+}
+
 // loadCmd fetches whatever the active tab needs (overview summary or a
 // resource table) for the current namespace.
 func (m Model) loadCmd() tea.Cmd {
@@ -106,8 +133,9 @@ func (m Model) loadCmd() tea.Cmd {
 			return overviewLoadedMsg{overview: ov, err: err}
 		}
 	}
+	clients := m.clients()
 	return func() tea.Msg {
-		rows, err := k8sres.List(session.Clientset, session.Metrics, kind, ns)
+		rows, err := k8sres.List(clients, kind, ns)
 		return rowsLoadedMsg{kind: kind, ns: ns, rows: rows, err: err}
 	}
 }
@@ -174,6 +202,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch m.active {
 	case overlayNamespace:
 		return m.updateNamespaceKey(msg)
+	case overlayResource:
+		return m.updateResourceKey(msg)
 	case overlayDetail:
 		return m.updateDetailKey(msg)
 	case overlayLogs:
@@ -219,36 +249,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, m.loadCmd()
 	case "n":
 		return m.openNamespacePicker()
+	case ":":
+		return m.openResourcePicker()
 	case "/":
 		if m.currentKind() != k8sres.KindOverview {
 			m.filtering = true
 			m.filterInput.Focus()
 			return m, textinput.Blink
 		}
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
-		// Keys 1-9 select tabs 1-9; 0 selects the 10th tab, matching the
-		// numbering shown in the tab bar (see tabKeyLabel).
-		idx := 9
-		if msg.String() != "0" {
-			idx = int(msg.String()[0] - '1')
-		}
-		if idx < len(k8sres.Kinds) {
-			m.kindIdx = idx
-			m.filterInput.SetValue("")
-			m.loading = true
-			m.loadErr = ""
-			return m, m.loadCmd()
-		}
 	case "tab":
-		m.kindIdx = (m.kindIdx + 1) % len(k8sres.Kinds)
-		m.loading = true
-		m.loadErr = ""
-		return m, m.loadCmd()
+		return m.switchKind((m.kindIdx + 1) % len(k8sres.Kinds))
 	case "shift+tab":
-		m.kindIdx = (m.kindIdx - 1 + len(k8sres.Kinds)) % len(k8sres.Kinds)
-		m.loading = true
-		m.loadErr = ""
-		return m, m.loadCmd()
+		return m.switchKind((m.kindIdx - 1 + len(k8sres.Kinds)) % len(k8sres.Kinds))
 	case "up", "down":
 		var cmd tea.Cmd
 		m.tbl, cmd = m.tbl.Update(msg)
@@ -275,6 +287,8 @@ func (m Model) View() string {
 	switch m.active {
 	case overlayNamespace:
 		return overlayOn(base, m.renderNamespaceOverlay(), m.width, m.height)
+	case overlayResource:
+		return overlayOn(base, m.renderResourceOverlay(), m.width, m.height)
 	case overlayDetail:
 		return overlayOn(base, m.renderDetailOverlay(), m.width, m.height)
 	case overlayLogs:
@@ -294,27 +308,45 @@ func (m Model) renderHeader() string {
 	return styles.HeaderBar.Width(max0(m.width)).Render(txt)
 }
 
-// tabKeyLabel is the key that selects the tab at index i: "1"-"9" for the
-// first nine tabs, then "0" for a tenth (see the "1".."9","0" key handling
-// in handleKey).
-func tabKeyLabel(i int) string {
-	if i < 9 {
-		return fmt.Sprintf("%d", i+1)
+// tabRows lays out every kind's rendered tab label into as many lines as it
+// takes to fit width w, wrapping at tab boundaries rather than truncating —
+// there are too many kinds (see k8sres.Kinds) to fit one line, and
+// Tab/Shift+Tab/":" (see openResourcePicker) are the real navigation, so
+// every tab staying visible matters more than a single tidy line.
+func (m Model) tabRows(w int) []string {
+	var rows []string
+	var cur strings.Builder
+	curWidth := 0
+	for i, k := range k8sres.Kinds {
+		var rendered string
+		if i == m.kindIdx {
+			rendered = styles.TabActive.Render(k.Title())
+		} else {
+			rendered = styles.TabInactive.Render(k.Title())
+		}
+		rw := lipgloss.Width(rendered)
+		if curWidth > 0 && curWidth+rw > w {
+			rows = append(rows, cur.String())
+			cur.Reset()
+			curWidth = 0
+		}
+		cur.WriteString(rendered)
+		curWidth += rw
 	}
-	return "0"
+	rows = append(rows, cur.String())
+	return rows
+}
+
+// tabLineCount is how many lines tabRows will use at width w, needed by
+// SetSize before the tabs are actually rendered.
+func tabLineCount(w int) int {
+	// A zero-value Model's tabRows only depends on k8sres.Kinds and w, not
+	// on any per-session state, so this is safe to call without one.
+	return len((Model{}).tabRows(max0(w)))
 }
 
 func (m Model) renderTabs() string {
-	var b strings.Builder
-	for i, k := range k8sres.Kinds {
-		label := tabKeyLabel(i) + ":" + k.Title()
-		if i == m.kindIdx {
-			b.WriteString(styles.TabActive.Render(label))
-		} else {
-			b.WriteString(styles.TabInactive.Render(label))
-		}
-	}
-	return b.String()
+	return strings.Join(m.tabRows(m.width), "\n")
 }
 
 func (m Model) renderFooter() string {
@@ -325,7 +357,7 @@ func (m Model) renderFooter() string {
 		return m.filterInput.View()
 	}
 	status := styles.Muted.Render(fmt.Sprintf("updated %s ago", roundSeconds(time.Since(m.lastLoaded))))
-	keys := "  /:filter  n:namespace  enter:yaml  l:logs(pods)  x:delete  r:refresh  ctrl+k:cluster  ?:help  q:quit"
+	keys := "  ::jump  tab:next  /:filter  n:namespace  enter:yaml  l:logs(pods)  x:delete  r:refresh  ctrl+k:cluster  ?:help  q:quit"
 	return status + styles.StatusBar.Render(keys)
 }
 

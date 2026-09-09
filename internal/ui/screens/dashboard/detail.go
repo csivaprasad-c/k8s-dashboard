@@ -33,9 +33,9 @@ func (m Model) openDetail() (Model, tea.Cmd) {
 	m.dt.vp.SetContent("")
 	m.dt.vp.GotoTop()
 
-	cs := m.session.Clientset
+	clients := m.clients()
 	return m, func() tea.Msg {
-		content, err := k8sres.GetYAML(cs, kind, row.Namespace, row.Name)
+		content, err := k8sres.GetYAML(clients, kind, row.Namespace, row.Name)
 		return yamlLoadedMsg{content: content, err: err}
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -17,32 +19,49 @@ const listTimeout = 10 * time.Second
 
 // List fetches rows for a kind in the given namespace (ignored for
 // cluster-scoped kinds). It is a synchronous, single-shot call intended to
-// be run from a tea.Cmd goroutine, not the UI loop. metricsClient may be
-// nil; it's only consulted for KindNodes, and only to add usage columns —
-// its absence or failure never fails the list itself.
-func List(clientset *kubernetes.Clientset, metricsClient *metricsclientset.Clientset, kind Kind, namespace string) ([]Row, error) {
+// be run from a tea.Cmd goroutine, not the UI loop. clients.Metrics and
+// clients.Dynamic may be nil; they back optional/add-on APIs and their
+// absence or failure never fails an unrelated kind's list.
+func List(clients Clients, kind Kind, namespace string) ([]Row, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 	defer cancel()
+	cs := clients.Core
 
 	switch kind {
 	case KindNodes:
-		return listNodes(ctx, clientset, metricsClient)
+		return listNodes(ctx, cs, clients.Metrics)
 	case KindPods:
-		return listPods(ctx, clientset, namespace)
+		return listPods(ctx, cs, namespace)
 	case KindDeployments:
-		return listDeployments(ctx, clientset, namespace)
+		return listDeployments(ctx, cs, namespace)
+	case KindDaemonSets:
+		return listDaemonSets(ctx, cs, namespace)
+	case KindStatefulSets:
+		return listStatefulSets(ctx, cs, namespace)
+	case KindJobs:
+		return listJobs(ctx, cs, namespace)
+	case KindCronJobs:
+		return listCronJobs(ctx, cs, namespace)
 	case KindServices:
-		return listServices(ctx, clientset, namespace)
+		return listServices(ctx, cs, namespace)
 	case KindIngress:
-		return listIngresses(ctx, clientset, namespace)
+		return listIngresses(ctx, cs, namespace)
+	case KindNetworkPolicies:
+		return listNetworkPolicies(ctx, cs, namespace)
 	case KindPV:
-		return listPVs(ctx, clientset)
+		return listPVs(ctx, cs)
 	case KindPVC:
-		return listPVCs(ctx, clientset, namespace)
+		return listPVCs(ctx, cs, namespace)
+	case KindStorageClasses:
+		return listStorageClasses(ctx, cs)
+	case KindHPA:
+		return listHPAs(ctx, cs, namespace)
+	case KindVPA:
+		return listVPAs(ctx, clients.Dynamic, namespace)
 	case KindConfig:
-		return listConfig(ctx, clientset, namespace)
+		return listConfig(ctx, cs, namespace)
 	case KindEvents:
-		return listEvents(ctx, clientset, namespace)
+		return listEvents(ctx, cs, namespace)
 	default:
 		return nil, fmt.Errorf("no lister for kind %v", kind)
 	}
@@ -256,6 +275,136 @@ func listDeployments(ctx context.Context, cs *kubernetes.Clientset, ns string) (
 	return rows, nil
 }
 
+func listDaemonSets(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.AppsV1().DaemonSets(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, d := range list.Items {
+		class := "ok"
+		if d.Status.NumberReady < d.Status.DesiredNumberScheduled {
+			class = "warn"
+		}
+		rows = append(rows, Row{
+			Name:      d.Name,
+			Namespace: d.Namespace,
+			Cells: []string{
+				d.Name,
+				fmt.Sprintf("%d", d.Status.DesiredNumberScheduled),
+				fmt.Sprintf("%d", d.Status.CurrentNumberScheduled),
+				fmt.Sprintf("%d", d.Status.NumberReady),
+				fmt.Sprintf("%d", d.Status.UpdatedNumberScheduled),
+				fmt.Sprintf("%d", d.Status.NumberAvailable),
+				age(d.CreationTimestamp.Time),
+			},
+			StatusClass: class,
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+func listStatefulSets(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.AppsV1().StatefulSets(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, s := range list.Items {
+		class := "ok"
+		if s.Status.ReadyReplicas < s.Status.Replicas {
+			class = "warn"
+		}
+		rows = append(rows, Row{
+			Name:      s.Name,
+			Namespace: s.Namespace,
+			Cells: []string{
+				s.Name,
+				fmt.Sprintf("%d/%d", s.Status.ReadyReplicas, s.Status.Replicas),
+				age(s.CreationTimestamp.Time),
+			},
+			StatusClass: class,
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+func listJobs(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.BatchV1().Jobs(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, j := range list.Items {
+		wanted := int32(1) // a Job with no Completions set defaults to 1
+		if j.Spec.Completions != nil {
+			wanted = *j.Spec.Completions
+		}
+		completions := fmt.Sprintf("%d/%d", j.Status.Succeeded, wanted)
+
+		duration := "-"
+		class := "warn"
+		switch {
+		case j.Status.CompletionTime != nil:
+			class = "ok"
+			if j.Status.StartTime != nil {
+				duration = j.Status.CompletionTime.Sub(j.Status.StartTime.Time).Round(time.Second).String()
+			}
+		case jobFailed(j):
+			class = "bad"
+		case j.Status.StartTime != nil:
+			duration = time.Since(j.Status.StartTime.Time).Round(time.Second).String()
+		}
+
+		rows = append(rows, Row{
+			Name:        j.Name,
+			Namespace:   j.Namespace,
+			Cells:       []string{j.Name, completions, duration, age(j.CreationTimestamp.Time)},
+			StatusClass: class,
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+func jobFailed(j batchv1.Job) bool {
+	for _, c := range j.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+func listCronJobs(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.BatchV1().CronJobs(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, c := range list.Items {
+		suspend := "False"
+		if c.Spec.Suspend != nil && *c.Spec.Suspend {
+			suspend = "True"
+		}
+		lastSchedule := "<none>"
+		if c.Status.LastScheduleTime != nil {
+			lastSchedule = age(c.Status.LastScheduleTime.Time) + " ago"
+		}
+		rows = append(rows, Row{
+			Name:      c.Name,
+			Namespace: c.Namespace,
+			Cells: []string{
+				c.Name, c.Spec.Schedule, suspend, fmt.Sprintf("%d", len(c.Status.Active)), lastSchedule, age(c.CreationTimestamp.Time),
+			},
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
 func listServices(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
 	list, err := cs.CoreV1().Services(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -386,6 +535,27 @@ func listIngresses(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]
 	return rows, nil
 }
 
+func listNetworkPolicies(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.NetworkingV1().NetworkPolicies(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, np := range list.Items {
+		selector := metav1.FormatLabelSelector(&np.Spec.PodSelector)
+		if selector == "" {
+			selector = "<none>"
+		}
+		rows = append(rows, Row{
+			Name:      np.Name,
+			Namespace: np.Namespace,
+			Cells:     []string{np.Name, selector, age(np.CreationTimestamp.Time)},
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
 func listPVs(ctx context.Context, cs *kubernetes.Clientset) ([]Row, error) {
 	list, err := cs.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -454,6 +624,109 @@ func listPVCs(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, 
 	}
 	sortRows(rows)
 	return rows, nil
+}
+
+func listStorageClasses(ctx context.Context, cs *kubernetes.Clientset) ([]Row, error) {
+	list, err := cs.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, sc := range list.Items {
+		name := sc.Name
+		if sc.Annotations["storageclass.kubernetes.io/is-default-class"] == "true" {
+			name += " (default)"
+		}
+		reclaim := "Delete"
+		if sc.ReclaimPolicy != nil {
+			reclaim = string(*sc.ReclaimPolicy)
+		}
+		binding := "Immediate"
+		if sc.VolumeBindingMode != nil {
+			binding = string(*sc.VolumeBindingMode)
+		}
+		expansion := "false"
+		if sc.AllowVolumeExpansion != nil && *sc.AllowVolumeExpansion {
+			expansion = "true"
+		}
+		rows = append(rows, Row{
+			Name:  sc.Name,
+			Cells: []string{name, sc.Provisioner, reclaim, binding, expansion, age(sc.CreationTimestamp.Time)},
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+func listHPAs(ctx context.Context, cs *kubernetes.Clientset, ns string) ([]Row, error) {
+	list, err := cs.AutoscalingV2().HorizontalPodAutoscalers(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(list.Items))
+	for _, h := range list.Items {
+		ref := fmt.Sprintf("%s/%s", h.Spec.ScaleTargetRef.Kind, h.Spec.ScaleTargetRef.Name)
+		minPods := "-"
+		if h.Spec.MinReplicas != nil {
+			minPods = fmt.Sprintf("%d", *h.Spec.MinReplicas)
+		}
+		rows = append(rows, Row{
+			Name:      h.Name,
+			Namespace: h.Namespace,
+			Cells: []string{
+				h.Name, ref, hpaTargets(h), minPods,
+				fmt.Sprintf("%d", h.Spec.MaxReplicas), fmt.Sprintf("%d", h.Status.CurrentReplicas),
+				age(h.CreationTimestamp.Time),
+			},
+		})
+	}
+	sortRows(rows)
+	return rows, nil
+}
+
+// hpaTargets renders each metric's current/target value, e.g.
+// "cpu: 45%/70%". Non-Resource metric types (Pods/Object/External) are
+// shown by type name only — their current/target shapes vary too much to
+// usefully compress into one cell.
+func hpaTargets(h autoscalingv2.HorizontalPodAutoscaler) string {
+	if len(h.Spec.Metrics) == 0 {
+		return "<none>"
+	}
+	parts := make([]string, 0, len(h.Spec.Metrics))
+	for _, m := range h.Spec.Metrics {
+		if m.Type != autoscalingv2.ResourceMetricSourceType || m.Resource == nil {
+			parts = append(parts, string(m.Type))
+			continue
+		}
+		name := string(m.Resource.Name)
+		current := findCurrentResourceMetric(h.Status.CurrentMetrics, m.Resource.Name)
+		switch {
+		case m.Resource.Target.AverageUtilization != nil:
+			cur := "<unknown>"
+			if current != nil && current.Current.AverageUtilization != nil {
+				cur = fmt.Sprintf("%d%%", *current.Current.AverageUtilization)
+			}
+			parts = append(parts, fmt.Sprintf("%s: %s/%d%%", name, cur, *m.Resource.Target.AverageUtilization))
+		case m.Resource.Target.AverageValue != nil:
+			cur := "<unknown>"
+			if current != nil && current.Current.AverageValue != nil {
+				cur = current.Current.AverageValue.String()
+			}
+			parts = append(parts, fmt.Sprintf("%s: %s/%s", name, cur, m.Resource.Target.AverageValue.String()))
+		default:
+			parts = append(parts, name)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func findCurrentResourceMetric(current []autoscalingv2.MetricStatus, name corev1.ResourceName) *autoscalingv2.ResourceMetricStatus {
+	for _, c := range current {
+		if c.Type == autoscalingv2.ResourceMetricSourceType && c.Resource != nil && c.Resource.Name == name {
+			return c.Resource
+		}
+	}
+	return nil
 }
 
 func pvPhaseClass(phase corev1.PersistentVolumePhase) string {

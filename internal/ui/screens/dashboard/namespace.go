@@ -84,7 +84,10 @@ func (m Model) updateNamespaceKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		if len(msg.Runes) == 1 {
+		// len > 1 happens too, not just fast typing: bubbletea can coalesce
+		// several bytes arriving in one read into a single multi-rune
+		// KeyMsg, so this must not require exactly one rune.
+		if len(msg.Runes) > 0 {
 			m.ns.filter += string(msg.Runes)
 			m.ns.cursor = 0
 		}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -23,6 +24,12 @@ type Session struct {
 	// treat those call failures as "usage data unavailable", not a fatal
 	// connection error.
 	Metrics *metricsclientset.Clientset
+	// Dynamic talks to any resource by GroupVersionResource, for kinds this
+	// dashboard doesn't have a typed client for — currently just
+	// VerticalPodAutoscaler, a CRD from the (separate) VPA project. Same
+	// deal as Metrics: building it can't fail; only calls against an
+	// uninstalled CRD do.
+	Dynamic dynamic.Interface
 }
 
 // Connect builds a clientset for the named kubeconfig context. It does not
@@ -48,6 +55,11 @@ func Connect(contextName string) (*Session, error) {
 		return nil, fmt.Errorf("building metrics client for context %q: %w", contextName, err)
 	}
 
+	dynamicClient, err := dynamic.NewForConfig(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("building dynamic client for context %q: %w", contextName, err)
+	}
+
 	contexts, err := LoadContexts()
 	if err != nil {
 		return nil, err
@@ -60,7 +72,7 @@ func Connect(contextName string) (*Session, error) {
 		}
 	}
 
-	return &Session{Context: cc, Config: restConfig, Clientset: clientset, Metrics: metricsClient}, nil
+	return &Session{Context: cc, Config: restConfig, Clientset: clientset, Metrics: metricsClient, Dynamic: dynamicClient}, nil
 }
 
 // Ping verifies the cluster is actually reachable and credentials are valid

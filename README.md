@@ -1,8 +1,10 @@
 # k8sdash
 
 A terminal dashboard for Kubernetes. Pick a cluster from your kubeconfig,
-connect, and browse it live — nodes, pods, deployments, services, ingresses,
-persistent volumes/claims, configmaps/secrets, and events — without leaving
+connect, and browse it live — nodes, workloads (pods, deployments,
+daemonsets, statefulsets, jobs, cronjobs), networking (services, ingresses,
+network policies), storage (persistent volumes/claims, storage classes),
+autoscaling (HPAs, VPAs), configmaps/secrets, and events — without leaving
 the terminal.
 
 Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and
@@ -30,7 +32,8 @@ It reads `$KUBECONFIG` (or `~/.kube/config` if unset), exactly like `kubectl`.
 
 | Key | Action |
 |---|---|
-| `1`-`9`, `0` / `Tab` / `Shift+Tab` | Switch resource tab (Overview, Nodes, Pods, Deploy, Svc, Ingress, PV, PVC, Cfg/Secrets, Events — `0` selects the 10th) |
+| `:` | Jump to a resource tab — type to search by name, `enter` to select (there are too many kinds for one key each) |
+| `Tab` / `Shift+Tab` | Cycle to the next/previous resource tab |
 | `↑`/`↓` | Move selection |
 | `/` | Filter the current table by name |
 | `n` | Switch namespace |
@@ -68,5 +71,11 @@ internal/
   comes from `metrics.k8s.io` (metrics-server). If that add-on isn't
   installed in the cluster, usage falls back to a muted "not available"
   note rather than erroring — capacity/health still show either way.
-- Nodes and PersistentVolumes are cluster-scoped, so they ignore the
-  active namespace; every other tab is scoped to it.
+- Nodes, PersistentVolumes, and StorageClasses are cluster-scoped, so they
+  ignore the active namespace; every other tab is scoped to it.
+- VerticalPodAutoscaler is a CRD from the separate
+  [autoscaler](https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler)
+  project, not core Kubernetes, and often isn't installed. Its tab is read
+  generically via a dynamic client rather than pulling in that project's
+  typed client as a dependency; a cluster without the CRD just shows the
+  same "resource not found" error any missing API would.

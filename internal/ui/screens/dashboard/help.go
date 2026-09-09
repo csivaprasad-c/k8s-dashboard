@@ -3,7 +3,8 @@ package dashboard
 import "github.com/csivaprasad/k8s-dashboard/internal/ui/styles"
 
 func renderHelp() string {
-	text := `1-9,0 / tab      switch resource tab
+	text := `:                jump to a resource tab (type to search)
+tab / shift+tab  cycle resource tabs
 ↑/↓              move selection
 /                filter current table
 n                switch namespace
