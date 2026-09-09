@@ -58,7 +58,7 @@ that release's assets instead of failing on "already exists".
 | `↑`/`↓` | Move selection |
 | `/` | Filter the current table by name |
 | `n` | Switch namespace |
-| `enter` | View the selected object as YAML |
+| `enter` | Describe the selected object (`kubectl describe`-equivalent); `d`/`y` inside toggle Describe/YAML |
 | `l` | Tail logs (pods only; prompts for a container if there's more than one) |
 | `x` | Delete the selected object (asks for `y`/`n` confirmation first) |
 | `r` | Force refresh (the dashboard also auto-refreshes every 5s) |
@@ -86,8 +86,16 @@ internal/
 - Resource lists refresh on a 5s poll (plus manual `r`) rather than a
   live watch/informer — simple and robust; a `SharedInformerFactory` would
   be the natural next step for push-based updates.
-- The YAML detail view redacts Secret values (keys/lengths are still
-  visible) and strips `managedFields` for readability.
+- The detail overlay's Describe mode uses kubectl's own describers
+  (`k8s.io/kubectl/pkg/describe`), so output matches `kubectl describe`
+  exactly — same sections, same "N bytes" Secret redaction. Kinds kubectl
+  itself has no typed describer for (Events, VPA, CRD) fall back to YAML,
+  with a note. The YAML mode redacts Secret values (keys/lengths still
+  visible), strips `managedFields`, and also blanks the
+  `kubectl.kubernetes.io/last-applied-configuration` annotation on
+  Secrets — created by `kubectl apply`, it otherwise stores a verbatim
+  JSON copy of the object as last applied, including original plaintext
+  `stringData` values, bypassing Data-only redaction entirely.
 - CPU/memory usage (Overview tab and the Nodes tab's CPU/MEMORY columns)
   comes from `metrics.k8s.io` (metrics-server). If that add-on isn't
   installed in the cluster, usage falls back to a muted "not available"

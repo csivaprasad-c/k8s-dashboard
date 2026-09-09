@@ -176,6 +176,7 @@ func GetYAML(clients Clients, kind Kind, namespace, name string) (string, error)
 			for k := range s.Data {
 				s.Data[k] = []byte("<redacted>")
 			}
+			redactLastAppliedConfig(s.Annotations)
 			obj = s
 		} else {
 			return "", e2
@@ -253,5 +254,18 @@ func Delete(clients Clients, kind Kind, namespace, name string) error {
 		return clientset.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	default:
 		return fmt.Errorf("delete not supported for kind %v", kind)
+	}
+}
+
+// redactLastAppliedConfig blanks out the "kubectl apply" bookkeeping
+// annotation, which stores a full JSON copy of the object as last applied —
+// for a Secret created via `kubectl apply` with `stringData`, that copy
+// contains the original plaintext values, bypassing Data-only redaction
+// entirely. This is why kubectl's own `describe` doesn't print this
+// annotation either.
+func redactLastAppliedConfig(annotations map[string]string) {
+	const lastAppliedConfigAnnotation = "kubectl.kubernetes.io/last-applied-configuration"
+	if _, ok := annotations[lastAppliedConfigAnnotation]; ok {
+		annotations[lastAppliedConfigAnnotation] = "<redacted: may echo this Secret's original values>"
 	}
 }

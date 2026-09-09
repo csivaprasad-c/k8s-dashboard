@@ -64,7 +64,10 @@ type Model struct {
 
 // clients bundles the session's clientsets for k8sres calls.
 func (m Model) clients() k8sres.Clients {
-	return k8sres.Clients{Core: m.session.Clientset, Metrics: m.session.Metrics, Dynamic: m.session.Dynamic}
+	return k8sres.Clients{
+		Core: m.session.Clientset, Metrics: m.session.Metrics, Dynamic: m.session.Dynamic,
+		RestConfig: m.session.Config,
+	}
 }
 
 func New(session *kube.Session, version string) Model {
@@ -103,10 +106,27 @@ func (m *Model) SetSize(w, h int) {
 	}
 	m.tbl.SetHeight(bodyHeight)
 	m.tbl.SetWidth(w)
-	m.dt.vp.Width = w - 4
-	m.dt.vp.Height = h - 4
-	m.lg.vp.Width = w - 4
-	m.lg.vp.Height = h - 6
+
+	// Both overlays render as: title + blank line + <viewport> + footer,
+	// wrapped in Border (1 line top/bottom, 1 col left/right) plus
+	// Padding(1, 2) (1 line top/bottom, 2 cols left/right). That's 7
+	// non-viewport lines and 6 non-viewport columns of chrome — get this
+	// wrong (as it was: -4/-6 for height, -4 for width) and the box
+	// overflows the terminal, pushing its own title off-screen.
+	const overlayChromeHeight = 7
+	const overlayChromeWidth = 6
+	vpHeight := h - overlayChromeHeight
+	if vpHeight < 5 {
+		vpHeight = 5
+	}
+	vpWidth := w - overlayChromeWidth
+	if vpWidth < 20 {
+		vpWidth = 20
+	}
+	m.dt.vp.Width = vpWidth
+	m.dt.vp.Height = vpHeight
+	m.lg.vp.Width = vpWidth
+	m.lg.vp.Height = vpHeight
 }
 
 func (m Model) currentKind() k8sres.Kind { return k8sres.Kinds[m.kindIdx] }
@@ -439,7 +459,7 @@ func (m Model) renderFooter() string {
 		return m.filterInput.View()
 	}
 	status := styles.Muted.Render(fmt.Sprintf("updated %s ago", roundSeconds(time.Since(m.lastLoaded))))
-	keys := "  ::jump  tab:next  /:filter  n:namespace  enter:yaml  l:logs(pods)  x:delete  r:refresh  ctrl+k:cluster  ?:help  q:quit"
+	keys := "  ::jump  tab:next  /:filter  n:namespace  enter:describe  l:logs(pods)  x:delete  r:refresh  ctrl+k:cluster  ?:help  q:quit"
 	return status + styles.StatusBar.Render(keys)
 }
 

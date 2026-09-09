@@ -27,9 +27,13 @@ type namespacesLoadedMsg struct {
 	err   error
 }
 
+// yamlLoadedMsg carries content for the detail overlay, in either of its
+// two modes (see detailMode in detail.go) — mode lets handleYAMLLoaded
+// ignore a stale response after the user has since toggled modes again.
 type yamlLoadedMsg struct {
 	content string
 	err     error
+	mode    detailMode
 }
 
 type deleteResultMsg struct {

@@ -8,7 +8,7 @@ tab / shift+tab  cycle resource tabs
 ↑/↓              move selection
 /                filter current table
 n                switch namespace
-enter            view YAML
+enter            describe selected (d/y inside it toggle describe/YAML)
 l                tail logs (pods only)
 x                delete selected (with confirmation)
 r                force refresh
