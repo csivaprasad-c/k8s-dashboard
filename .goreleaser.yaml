@@ -1,0 +1,58 @@
+version: 2
+
+project_name: k8sdash
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: k8sdash
+    main: ./cmd/k8sdash
+    binary: k8sdash
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    # Match the exact platform matrix the project has shipped since v0.1.0:
+    # windows/amd64, darwin/arm64, linux/arm64 only.
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: linux
+        goarch: amd64
+      - goos: darwin
+        goarch: amd64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: k8sdash
+    # k8sdash-<version>-<os>-<arch>[.exe], matching every release through
+    # v0.2.0 so existing download links/scripts don't break.
+    name_template: "k8sdash-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: csivaprasad-c
+    name: k8s-dashboard

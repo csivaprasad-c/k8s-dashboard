@@ -22,19 +22,28 @@ It reads `$KUBECONFIG` (or `~/.kube/config` if unset), exactly like `kubectl`.
 
 ### Releasing
 
-Push a tag matching `v*.*.*` and [.github/workflows/release.yml](.github/workflows/release.yml)
-cross-compiles windows/amd64, darwin/arm64, and linux/arm64 (`make dist`),
-then publishes them as a GitHub Release with a `checksums.txt`:
+Releases are built with [GoReleaser](https://goreleaser.com) (config:
+[.goreleaser.yaml](.goreleaser.yaml)). Push a tag matching `v*.*.*` and
+[.github/workflows/release.yml](.github/workflows/release.yml)
+cross-compiles windows/amd64, darwin/arm64, and linux/arm64, then publishes
+a GitHub Release with the archives, a `checksums.txt`, and an
+auto-generated changelog attached:
 
 ```sh
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-To re-run a release for a tag that's already been pushed (e.g. after a
-failed run), use the "Run workflow" button on the Release workflow in the
-Actions tab, or `gh workflow run release.yml -f tag=v0.1.0` — it replaces
-that release's assets instead of failing on "already exists".
+To try a config change locally first, without a tag or touching GitHub:
+
+```sh
+brew install goreleaser   # if you don't have it
+make release-snapshot     # builds dist/ exactly as CI would, skips publishing
+```
+
+If a release run fails partway, delete the tag and its (partial) GitHub
+release, then re-push the tag — GoReleaser refuses to publish over an
+existing release for the same tag.
 
 ## Screens
 

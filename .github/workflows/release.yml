@@ -1,18 +1,13 @@
 name: Release
 
 # Push a tag like v1.2.3 to build k8sdash for windows/amd64, darwin/arm64,
-# and linux/arm64, and publish a GitHub Release with the archives (plus a
-# checksums.txt) attached. workflow_dispatch lets you re-run the same build
-# for an already-pushed tag without re-tagging.
+# and linux/arm64 and publish a GitHub Release with the archives (plus a
+# checksums.txt and an auto-generated changelog) attached — see
+# .goreleaser.yaml for exactly what gets built/published.
 on:
   push:
     tags:
       - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Existing tag to build and (re-)publish a release for"
-        required: true
 
 permissions:
   contents: write
@@ -21,30 +16,21 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out ${{ inputs.tag || github.ref_name }}
+      - name: Check out code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
-          fetch-depth: 0 # let `git describe` see tags, for the version stamped into the binary
+          fetch-depth: 0 # goreleaser needs full history for the changelog and `git describe`
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Build release archives
-        run: make dist VERSION=${{ inputs.tag || github.ref_name }}
-
-      - name: Publish GitHub release
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          tag="${{ inputs.tag || github.ref_name }}"
-          repo="${{ github.repository }}"
-          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
-            # Re-run for a tag that's already released (e.g. workflow_dispatch
-            # retry): replace its assets instead of failing on "already exists".
-            gh release upload "$tag" dist/* --repo "$repo" --clobber
-          else
-            gh release create "$tag" dist/* --repo "$repo" --title "$tag" --generate-notes --latest
-          fi
