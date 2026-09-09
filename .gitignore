@@ -1,0 +1,5 @@
+/bin/
+/dist/
+k8sdash
+*.log
+.DS_Store
