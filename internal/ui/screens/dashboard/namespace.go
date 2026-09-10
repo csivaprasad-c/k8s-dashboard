@@ -105,7 +105,13 @@ func (m Model) renderNamespaceOverlay() string {
 	} else if m.ns.err != "" {
 		b.WriteString(styles.ErrorText.Render(m.ns.err))
 	} else {
-		for i, n := range m.filteredNamespaces() {
+		list := m.filteredNamespaces()
+		start, end := scrollWindow(len(list), m.ns.cursor, pickerMaxVisible(m.height))
+		if start > 0 {
+			b.WriteString(styles.Muted.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
+		}
+		for i := start; i < end; i++ {
+			n := list[i]
 			cursor := "  "
 			line := n
 			if n == m.namespace {
@@ -116,6 +122,9 @@ func (m Model) renderNamespaceOverlay() string {
 				line = styles.SelectedRow.Render(line)
 			}
 			b.WriteString(cursor + line + "\n")
+		}
+		if end < len(list) {
+			b.WriteString(styles.Muted.Render(fmt.Sprintf("  ↓ %d more", len(list)-end)) + "\n")
 		}
 	}
 	b.WriteString("\n" + styles.StatusBar.Render("↑/↓ move · type to filter · enter select · esc cancel"))

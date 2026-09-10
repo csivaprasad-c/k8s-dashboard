@@ -97,7 +97,12 @@ func (m Model) renderResourceOverlay() string {
 	if len(list) == 0 {
 		b.WriteString(styles.Muted.Render("no matches"))
 	}
-	for i, k := range list {
+	start, end := scrollWindow(len(list), m.rp.cursor, pickerMaxVisible(m.height))
+	if start > 0 {
+		b.WriteString(styles.Muted.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
+	}
+	for i := start; i < end; i++ {
+		k := list[i]
 		cursor := "  "
 		line := k.Title()
 		if k == m.currentKind() {
@@ -108,6 +113,9 @@ func (m Model) renderResourceOverlay() string {
 			line = styles.SelectedRow.Render(line)
 		}
 		b.WriteString(cursor + line + "\n")
+	}
+	if end < len(list) {
+		b.WriteString(styles.Muted.Render(fmt.Sprintf("  ↓ %d more", len(list)-end)) + "\n")
 	}
 
 	b.WriteString("\n" + styles.StatusBar.Render("↑/↓ move · type to filter · enter select · esc cancel"))
